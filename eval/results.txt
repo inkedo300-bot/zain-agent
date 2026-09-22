@@ -1,0 +1,11 @@
+Questions (exact number): 23/23 (100%)
+HELD-OUT questions (not used for tuning): 15/18 (83%)
+   ✗ شكد عند الناس فلوس إلي؟ → unknown null truth 1035000
+   ✗ الكاش راح يخلص قبل الإيجار؟ → expenses 750000 truth null
+   ✗ شنو المادة اللي تجيب ربح أكثر؟ → profit 166500 truth null
+Paraphrases: 30/30 (100%) · consistent groups 6/6
+Refusals: 6/6 (100%)
+Entries (all fields right): 14/14 (100%) · field accuracy 100%
+Anomalies over 20 shops: precision 97% recall 94% (tp 151 fp 4 fn 9)
+   per kind {"duplicate_payment":{"planted":20,"found":20,"fp":0},"low_day":{"planted":20,"found":20,"fp":0},"price_jump":{"planted":20,"found":20,"fp":4},"below_cost":{"planted":20,"found":20,"fp":0},"overdue":{"planted":20,"found":11,"fp":0},"unmatched_in":{"planted":20,"found":20,"fp":0},"odd_refund":{"planted":20,"found":20,"fp":0},"cash_short":{"planted":20,"found":20,"fp":0}}
+Forecast backtest: MAE model 27063 vs naive 55999 (51.7% better, beat naive in 20/20)

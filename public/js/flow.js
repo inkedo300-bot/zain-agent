@@ -1,0 +1,133 @@
+// ─────────────────────────────────────────────────────────────
+// Workflow diagram (swimlanes) for the middle panel.
+// Lanes run right → left like the page: the merchant's phone is on the right,
+// the customer's / supplier's phone on the left, and the diagram sits between them.
+// ─────────────────────────────────────────────────────────────
+
+export const LANES = {
+  m: { title: 'صاحب المحل', sub: 'هاتفه', color: '#5b2a86', tint: '#f6f1fb' },
+  a: { title: 'الوكيل', sub: 'Gemini + المدقق', color: '#2563a8', tint: '#f1f6fc' },
+  l: { title: 'الدفتر', sub: 'يحسب ويحفظ', color: '#4a4552', tint: '#f7f6f8' },
+  w: { title: 'المحفظة', sub: 'الفلوس والإشعارات', color: '#c01f68', tint: '#fdf2f7' },
+  c: { title: 'الزبون', sub: 'محفظته', color: '#5b2a86', tint: '#f6f1fb' },
+  s: { title: 'المورد', sub: 'محفظة أعمال', color: '#1f6e55', tint: '#eef7f3' },
+};
+
+// d = decision. alt = the other branch, drawn dashed to the side.
+export const FLOWS = {
+  debt: {
+    title: 'الدين والتحصيل',
+    lanes: ['m', 'a', 'l', 'w', 'c'],
+    try: { label: 'جرّبها: ذكّر أم زينب', chat: 'ذكّر أم زينب' },
+    steps: [
+      { id: 'd1', lane: 'm', t: 'بعت لأم زينب|بالدين', x: 'صاحب المحل يگول أو يكتب «بعت 3 كراتين ببسي لأم زينب بالدين». ما يحتاج دفتر ورقي.', where: 'المساعد' },
+      { id: 'd2', lane: 'a', t: 'Gemini يفهم القيد', x: 'Gemini يطلع منو الزبون وشنو المادة وكم. السعر ما ياخذه من Gemini، ينحسب من قائمة أسعار المحل.', where: 'خطوات الوكيل' },
+      { id: 'd3', lane: 'm', t: 'بطاقة تأكيد|قبل الحفظ', x: 'تطلع بطاقة بيها كل الحقول. إذا شي ناقص أو غلط يصلحه، وما ينحفظ شي بدون موافقته.', where: 'المساعد' },
+      { id: 'd4', lane: 'l', t: 'ينحفظ قيد الدين', x: 'الدين ينحفظ بالدفتر ويا رقم قيد، وكل رقم يطلع بعدين يرجع لهذا القيد.', where: 'الدفتر' },
+      { id: 'd5', lane: 'c', t: 'إشعار: أكّدي الدين|أو اعترضي', x: 'الزبونة يوصلها إشعار بمحفظتها تأكد الدين أو تعترض. هيچ ماكو «ما أخذت شي» بعدين.', where: 'هاتف الزبون' },
+      { id: 'd6', lane: 'm', t: 'ذكّر أم زينب', x: 'لما يتأخر الدين، صاحب المحل يگول «ذكّر أم زينب» بالصوت أو الكتابة، أو يضغط زر التذكير.', where: 'المساعد أو الديون' },
+      { id: 'd7', lane: 'a', d: 1, t: 'Gemini يكتب التذكير|المبلغ مطابق؟', x: 'Gemini يكتب رسالة مؤدبة باللهجة. المدقق يتأكد إن المبلغ نفس الدين بالضبط. إذا لا، تطلع الرسالة الجاهزة.', alt: { lane: 'l', t: 'لا ← رسالة جاهزة' }, where: 'بطاقة التذكير' },
+      { id: 'd8', lane: 'w', t: 'رابط دفع|بزر «ادفع»', x: 'بعد ما يضغط «أرسل»، المحفظة تضيف زر دفع بنفس مبلغ الدين.', where: 'أحداث المحفظة' },
+      { id: 'd9', lane: 'c', t: 'إشعار تذكير|تدفع بضغطة', x: 'الزبونة تشوف التذكير وتدفع كامل أو جزء من رصيدها بضغطة، بدون ما تجي للمحل.', where: 'هاتف الزبون' },
+      { id: 'd10', lane: 'w', t: 'الفلوس تنتقل', x: 'الدفعة تنتقل من محفظتها لمحفظة المحل فوراً.', where: 'أحداث المحفظة' },
+      { id: 'd11', lane: 'l', t: 'تتطابق وحدها|ويا الدين', x: 'الدفتر يربط الدفعة بالدين المفتوح تلقائياً، فالرصيد ينزل بدون ما أحد يسجل شي.', where: 'الديون' },
+      { id: 'd12', lane: 'm', t: 'إشعار: وصلك المبلغ ✓', x: 'صاحب المحل ياخذ إشعار إن الفلوس وصلت وتطابقت. الدين انسد.', where: 'هاتف صاحب المحل' },
+    ],
+  },
+  ask: {
+    title: 'سؤال بالصوت',
+    lanes: ['m', 'a', 'l', 'w', 'c'],
+    try: { label: 'جرّبها: شكد ربحت هالأسبوع؟', chat: 'شكد ربحت هالأسبوع؟' },
+    steps: [
+      { id: 'q1', lane: 'm', t: 'شكد ربحت|هالأسبوع؟', x: 'صاحب المحل يسأل بالصوت أو الكتابة، باللهجة. يگدر يسأل سؤالين بجملة وحدة.', where: 'المساعد' },
+      { id: 'q2', lane: 'a', t: 'Gemini يحوّل|الصوت لنص', x: 'التسجيل يروح لـGemini ويا أسماء الزباين والمواد، حتى يكتبها صح.', where: 'أحداث المحفظة' },
+      { id: 'q3', lane: 'a', d: 1, t: 'Gemini يختار أداة|الاختيار صالح؟', x: 'Gemini ما يحسب. يختار أداة من 12 أداة (ربح، ديون، مخزون…) والفترة. إذا اختياره غلط، يشتغل المحلل الثابت بداله.', alt: { lane: 'l', t: 'لا ← المحلل الثابت' }, where: 'خطوات الوكيل' },
+      { id: 'q4', lane: 'l', t: 'الأداة تحسب الرقم|ويا أرقام القيود', x: 'الدفتر يحسب الرقم بالكود، وكل رقم وياه أرقام القيود اللي انحسب منها.', where: 'خطوات الوكيل' },
+      { id: 'q5', lane: 'a', t: 'Gemini يصيغ الجواب', x: 'Gemini ياخذ الأرقام الجاهزة ويكتب جواب قصير باللهجة.', where: 'خطوات الوكيل' },
+      { id: 'q6', lane: 'a', d: 1, t: 'المدقق: الأرقام صح؟|ماكو كلام مخترع؟', x: 'المدقق يرفض الجواب إذا بيه رقم مو موجود بالنتيجة، أو نسي الرقم الأساسي، أو نسب كلام لزبون. وقتها يطلع جواب ثابت.', alt: { lane: 'l', t: 'لا ← الجواب الثابت' }, where: 'خطوات الوكيل' },
+      { id: 'q7', lane: 'm', t: 'الجواب: كل رقم|ينضغط ويبين قيوده', x: 'الجواب يوصل، وأي رقم بيه ينضغط ويبين القيود اللي انحسب منها.', where: 'المساعد' },
+    ],
+  },
+  order: {
+    title: 'طلبية المورد',
+    lanes: ['m', 'a', 'l', 'w', 's'],
+    try: { label: 'افتح الموردين', screen: 'sup' },
+    steps: [
+      { id: 'o1', lane: 'l', t: 'كل بيع ينقّص|المخزون', x: 'المخزون ينحسب من الدفتر: أول المدة + الواصل − المبيوع ± الجرد.', where: 'المخزون' },
+      { id: 'o2', lane: 'a', d: 1, t: 'السكر يكفي 1.5 يوم|أقل من التوصيل + 2؟', x: 'كل مادة: كم يوم يكفي = الموجود ÷ بيع آخر 7 أيام. إذا أقل من وقت توصيل المورد + يومين، تحتاج طلبية.', where: 'المخزون' },
+      { id: 'o3', lane: 'a', t: 'يحسب الكمية|حسب سرعة البيع', x: 'الكمية تكفي 10 أيام حسب سرعة البيع، ناقص الموجود والطلبيات اللي بالطريق.', where: 'الموردين' },
+      { id: 'o4', lane: 'a', d: 1, t: 'تلقائي مفعّل|وتحت الحد؟', x: 'صاحب المحل يحدد لكل مورد: طلب تلقائي نعم/لا وحد أعلى للمبلغ. تحت الحد تنرسل وحدها، وفوقه تنتظر موافقته.', alt: { lane: 'm', t: 'لا ← تنتظر موافقتك' }, where: 'الموردين' },
+      { id: 'o5', lane: 's', t: 'إشعار: طلبية جديدة', x: 'المورد يوصله إشعار بمحفظة الأعمال بيه الطلبية كاملة.', where: 'هاتف المورد' },
+      { id: 'o6', lane: 's', t: 'قبول / تعديل|الكميات / رفض', x: 'المورد يقبل، أو يعدّل إذا عنده نص الكمية، أو يرفض. صاحب المحل ياخذ إشعار بكل حالة.', where: 'هاتف المورد' },
+      { id: 'o7', lane: 's', t: 'سلّم البضاعة|وأرسل فاتورة', x: 'المورد يكتب سعر كل مادة ويرسل الفاتورة.', where: 'هاتف المورد' },
+      { id: 'o8', lane: 'a', d: 1, t: 'السعر أعلى من|آخر مرة؟', x: 'إذا سعر مادة زاد أكثر من 8% عن آخر مرة، يطلع تنبيه قبل الدفع.', alt: { lane: 'm', t: 'نعم ← تنبيه قبل الدفع' }, where: 'الموردين' },
+      { id: 'o9', lane: 'm', t: 'يدفع الفاتورة', x: 'صاحب المحل يدفع بالمحفظة أو كاش. الدفع دائماً بيده.', where: 'الموردين' },
+      { id: 'o10', lane: 'w', t: 'الدفعة للمورد', x: 'الفلوس تنتقل لمحفظة المورد.', where: 'أحداث المحفظة' },
+      { id: 'o11', lane: 'l', t: 'قيد شراء|المخزون يزيد', x: 'قيد شراء ينحفظ بالكميات والأسعار، والمخزون يزيد وحده.', where: 'المخزون' },
+      { id: 'o12', lane: 's', t: 'إشعار: وصلت الدفعة', x: 'المورد ياخذ إشعار إن الدفعة وصلت.', where: 'هاتف المورد' },
+    ],
+  },
+};
+
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// sel: selected step index; live: index of the last step that really happened in the app
+export function flowSVG(key, { sel = -1, live = -1 } = {}) {
+  const F = FLOWS[key];
+  const W = 680, LW = W / F.lanes.length, NW = LW - 18, HEAD = 58, GAP = 20;
+  const cx = (lane) => W - (F.lanes.indexOf(lane) + 0.5) * LW;
+  let y = HEAD + 16;
+  const rows = F.steps.map((s) => { const h = s.d ? 46 : 38; const r = { ...s, y, h }; y += h + GAP; return r; });
+  const H = y + 4;
+  const out = [];
+  out.push(`<svg viewBox="0 0 ${W} ${H}" class="flowsvg" role="img" aria-label="مخطط سير العمل: ${esc(F.title)}" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8a8494"/></marker>
+  <marker id="ahOn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#17845a"/></marker></defs>`);
+  // lanes
+  F.lanes.forEach((k, i) => {
+    const L = LANES[k], x = W - (i + 1) * LW;
+    out.push(`<rect x="${x}" y="0" width="${LW}" height="${H}" fill="${L.tint}"/>`);
+    if (i) out.push(`<line x1="${x + LW}" y1="0" x2="${x + LW}" y2="${H}" stroke="#e3dee9"/>`);
+    out.push(`<rect x="${x + 6}" y="6" width="${LW - 12}" height="${HEAD - 12}" rx="10" fill="#fff" stroke="${L.color}" stroke-opacity=".35"/>
+      <rect x="${x + 6}" y="6" width="${LW - 12}" height="4" rx="2" fill="${L.color}"/>
+      <text x="${x + LW / 2}" y="30" text-anchor="middle" class="lt" fill="${L.color}">${L.title}</text>
+      <text x="${x + LW / 2}" y="45" text-anchor="middle" class="ls">${L.sub}</text>`);
+  });
+  // connectors
+  for (let i = 0; i < rows.length - 1; i++) {
+    const a = rows[i], b = rows[i + 1];
+    const x1 = cx(a.lane), x2 = cx(b.lane), y1 = a.y + a.h, y2 = b.y, ym = y1 + GAP / 2;
+    const on = live >= i + 1;
+    const d = x1 === x2 ? `M${x1},${y1} V${y2 - 1}` : `M${x1},${y1} V${ym} H${x2} V${y2 - 1}`;
+    out.push(`<path d="${d}" fill="none" stroke="${on ? '#17845a' : '#8a8494'}" stroke-width="${on ? 2 : 1.3}" marker-end="url(#${on ? 'ahOn' : 'ah'})"/>`);
+  }
+  // nodes
+  rows.forEach((s, i) => {
+    const x = cx(s.lane), L = LANES[s.lane];
+    const state = i === sel ? 'sel' : i === live ? 'live' : i < live ? 'done' : '';
+    const fill = state === 'sel' ? '#efe6f8' : state === 'live' ? '#fff' : state === 'done' ? '#e7f5ee' : '#fff';
+    const stroke = state === 'sel' ? '#5b2a86' : state === 'live' ? '#e0287a' : state === 'done' ? '#17845a' : L.color;
+    const sw = state ? 2.2 : 1.2;
+    const [l1, l2] = s.t.split('|');
+    // decision alt branch
+    if (s.alt) {
+      const ax = cx(s.alt.lane), ay = s.y + s.h / 2, aw = Math.min(NW, 118);
+      const from = ax > x ? x + NW / 2 : x - NW / 2, to = ax > x ? ax - aw / 2 : ax + aw / 2;
+      out.push(`<path d="M${from},${ay} H${to}" stroke="#a39cad" stroke-dasharray="4 3" fill="none" marker-end="url(#ah)"/>
+        <rect x="${ax - aw / 2}" y="${ay - 13}" width="${aw}" height="26" rx="13" fill="#fff" stroke="#a39cad" stroke-dasharray="4 3"/>
+        <text x="${ax}" y="${ay + 4}" text-anchor="middle" class="alt">${esc(s.alt.t)}</text>`);
+    }
+    out.push(`<g class="fnode ${state}" data-p="flowStep" data-i="${i}" tabindex="0" role="button" aria-label="${i + 1}. ${esc(s.t.replace('|', ' '))}">`);
+    if (s.d) {
+      const hw = NW / 2, c = 14;
+      out.push(`<polygon points="${x - hw + c},${s.y} ${x + hw - c},${s.y} ${x + hw},${s.y + s.h / 2} ${x + hw - c},${s.y + s.h} ${x - hw + c},${s.y + s.h} ${x - hw},${s.y + s.h / 2}" fill="${state ? fill : '#fffaf0'}" stroke="${state ? stroke : '#b86e00'}" stroke-width="${sw}"/>`);
+    } else out.push(`<rect x="${x - NW / 2}" y="${s.y}" width="${NW}" height="${s.h}" rx="10" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`);
+    const ty = l2 ? s.y + s.h / 2 - 3 : s.y + s.h / 2 + 4;
+    out.push(`<text x="${x}" y="${ty}" text-anchor="middle" class="nt">${esc(l1)}</text>`);
+    if (l2) out.push(`<text x="${x}" y="${ty + 14}" text-anchor="middle" class="nt2">${esc(l2)}</text>`);
+    const bx = x + NW / 2 - 2, by = s.y + 1;
+    out.push(`<circle cx="${bx}" cy="${by}" r="8.5" fill="${state === 'done' ? '#17845a' : state === 'live' ? '#e0287a' : state === 'sel' ? '#5b2a86' : L.color}"/><text x="${bx}" y="${by + 3.5}" text-anchor="middle" class="bn">${i + 1}</text></g>`);
+  });
+  out.push('</svg>');
+  return out.join('');
+}

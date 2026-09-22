@@ -1,0 +1,82 @@
+{
+  "offline": {
+    "qa": [
+      25,
+      25
+    ],
+    "held": [
+      16,
+      19
+    ],
+    "para": [
+      30,
+      30
+    ],
+    "refuse": [
+      6,
+      6
+    ],
+    "entries": [
+      14,
+      14
+    ]
+  },
+  "shops": {
+    "seeds": 20,
+    "anomalies": {
+      "tp": 156,
+      "fp": 4,
+      "fn": 4,
+      "precision": 0.975,
+      "recall": 0.975,
+      "perKind": {
+        "duplicate_payment": {
+          "planted": 20,
+          "found": 20,
+          "fp": 0
+        },
+        "low_day": {
+          "planted": 20,
+          "found": 20,
+          "fp": 0
+        },
+        "price_jump": {
+          "planted": 20,
+          "found": 20,
+          "fp": 4
+        },
+        "below_cost": {
+          "planted": 20,
+          "found": 20,
+          "fp": 0
+        },
+        "overdue": {
+          "planted": 20,
+          "found": 16,
+          "fp": 0
+        },
+        "unmatched_in": {
+          "planted": 20,
+          "found": 20,
+          "fp": 0
+        },
+        "odd_refund": {
+          "planted": 20,
+          "found": 20,
+          "fp": 0
+        },
+        "cash_short": {
+          "planted": 20,
+          "found": 20,
+          "fp": 0
+        }
+      }
+    },
+    "backtest": {
+      "maeModel": 35976,
+      "maeNaive": 56429,
+      "improvement": 36.2,
+      "beatNaive": 20
+    }
+  }
+}

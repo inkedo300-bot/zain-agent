@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>دفتر — مساعد صاحب المحل</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brandmark">
+      <div class="logo"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h11a3 3 0 013 3v13H8a3 3 0 01-3-3z"/><path d="M5 17a3 3 0 013-3h11"/><path d="M9 8h6"/></svg></div>
+      <div><b>دفتر</b><span>دفتر الدين والحسابات داخل المحفظة</span></div>
+    </div>
+    <div class="spacer"></div>
+    <span class="pill" id="enginePill"><span class="dot"></span><span>جاري الفحص…</span></span>
+    <button class="btn sm" id="settingsBtn">الإعدادات</button>
+    <button class="btn sm" id="resetBtn">إعادة ضبط</button>
+  </header>
+
+  <main class="stage">
+    <section class="col">
+      <div class="col-head"><h2>هاتف صاحب المحل</h2><span class="pill" id="shopPill"></span></div>
+      <div class="phone" id="phoneA"><div class="screen"><div class="statusbar" id="sbA"></div><div class="app" id="appA"></div><div class="homebar"></div></div></div>
+    </section>
+
+    <section class="col panelcol">
+      <div class="card panel">
+        <div class="panel-head"><div><h3>شنو ديصير ورا الشاشة</h3><small>النموذج يفهم ويشرح، والدفتر يحسب. كل خطوة تنعرض هنا.</small></div><div style="display:flex;gap:8px;align-items:center"><button class="btn sm primary" id="flowBtn">اعرض مخطط العمل</button><span class="src" id="modeBadge"></span></div></div>
+        <div class="tabs" id="tabs"></div>
+        <div class="panel-body" id="panelBody"></div>
+      </div>
+    </section>
+
+    <section class="col">
+      <div class="col-head"><h2 id="phoneBTitle">هاتف الزبون (محفظته)</h2><select class="sel" id="custSel"></select></div>
+      <div class="phone" id="phoneB"><div class="screen"><div class="statusbar dark" id="sbB"></div><div class="app" id="appB"></div><div class="homebar"></div></div></div>
+    </section>
+  </main>
+
+  <div id="modalRoot"></div>
+  <input type="file" id="fileImg" accept="image/*" hidden>
+  <script type="module" src="js/ui.js"></script>
+</body>
+</html>

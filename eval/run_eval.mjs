@@ -1,0 +1,23 @@
+// node eval/run_eval.mjs  → offline evaluation (no API key needed)
+import { generate } from '../public/js/data.js';
+import { Ledger } from '../public/js/ledger.js';
+import { evalOffline, evalShops } from '../public/js/eval.js';
+import { writeFileSync } from 'node:fs';
+const L = new Ledger(generate());
+const o = evalOffline(L);
+const s = evalShops(20);
+const pct = (a, b) => `${a}/${b} (${Math.round((a / b) * 100)}%)`;
+console.log('Questions (exact number):', pct(o.qa.ok, o.qa.n));
+o.qa.rows.filter((r) => !r.ok).forEach((r) => console.log('   ✗', r.q, '→', r.gotTool, r.got, 'truth', r.truth));
+console.log('HELD-OUT questions (not used for tuning):', pct(o.held.ok, o.held.n));
+o.held.rows.filter((r) => !r.ok).forEach((r) => console.log('   ✗', r.q, '→', r.gotTool, r.got, 'truth', r.truth));
+console.log('Paraphrases:', pct(o.para.ok, o.para.n), '· consistent groups', o.para.consistentGroups + '/' + o.para.groups.length);
+o.para.groups.filter((g) => g.fails.length).forEach((g) => console.log('   ✗', g.group, g.fails.join(' | ')));
+console.log('Refusals:', pct(o.refuse.ok, o.refuse.n));
+o.refuse.rows.filter((r) => !r.ok).forEach((r) => console.log('   ✗', r.q, '→', r.got));
+console.log('Entries (all fields right):', pct(o.entries.ok, o.entries.n), '· field accuracy', Math.round(o.entries.fieldAcc * 100) + '%');
+o.entries.rows.filter((r) => !r.ok).forEach((r) => console.log('   ✗', r.t, JSON.stringify(r.fields)));
+console.log(`Anomalies over ${s.seeds} shops: precision ${Math.round(s.anomalies.precision * 100)}% recall ${Math.round(s.anomalies.recall * 100)}% (tp ${s.anomalies.tp} fp ${s.anomalies.fp} fn ${s.anomalies.fn})`);
+console.log('   per kind', JSON.stringify(s.anomalies.perKind));
+console.log(`Forecast backtest: MAE model ${s.backtest.maeModel} vs naive ${s.backtest.maeNaive} (${s.backtest.improvement}% better, beat naive in ${s.backtest.beatNaive}/${s.seeds})`);
+writeFileSync(new URL('./results.json', import.meta.url), JSON.stringify({ offline: { qa: [o.qa.ok, o.qa.n], held: [o.held.ok, o.held.n], para: [o.para.ok, o.para.n], refuse: [o.refuse.ok, o.refuse.n], entries: [o.entries.ok, o.entries.n] }, shops: s }, null, 2));

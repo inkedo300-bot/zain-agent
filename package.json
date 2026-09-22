@@ -1,0 +1,13 @@
+{
+  "name": "daftar",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "دفتر — مساعد صاحب المحل داخل المحفظة (Agentic AI Challenge Iraq, topic 02)",
+  "scripts": {
+    "start": "node server.js",
+    "eval": "node eval/run_eval.mjs",
+    "test": "node tests/agent_llm.test.mjs && node tests/commands.test.mjs"
+  },
+  "engines": { "node": ">=18" }
+}
