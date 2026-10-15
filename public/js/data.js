@@ -59,7 +59,7 @@ export const CUSTOMERS = [
   { id: 'C1',  name: 'أبو حسين',   full: 'حسين علي كريم',    phone: '07711000001', delay: 6,  every: 3, avg: 18000, pWallet: 0.9 },
   { id: 'C2',  name: 'أم زينب',    full: 'زينب عبد الله',     phone: '07711000002', delay: 12, every: 4, avg: 22000, pWallet: 0.7 },
   { id: 'C3',  name: 'أبو علي',    full: 'علي حسن جاسم',     phone: '07711000003', delay: 0,  every: 5, avg: 30000, pWallet: 0.8, paysAfterSalary: true },
-  { id: 'C4',  name: 'حجي كاظم',   full: 'كاظم عبود خلف',    phone: '07711000004', delay: 26, every: 6, avg: 35000, pWallet: 0.2, partial: true },
+  { id: 'C4',  name: 'حجي كاظم',   full: 'كاظم عبود خلف',    phone: '07711000004', delay: 26, every: 6, avg: 35000, pWallet: 0.2, partial: true, ageBand: '60+' },
   { id: 'C5',  name: 'سيد جاسم',   full: 'جاسم محمد باقر',   phone: '07711000005', delay: 9,  every: 7, avg: 15000, pWallet: 0.6 },
   { id: 'C6',  name: 'مصطفى الحداد', full: 'مصطفى كامل',     phone: '07711000006', delay: 4,  every: 4, avg: 12000, pWallet: 1.0 },
   { id: 'C7',  name: 'أم مريم',    full: 'مريم صالح',        phone: '07711000007', delay: 15, every: 6, avg: 25000, pWallet: 0.5 },

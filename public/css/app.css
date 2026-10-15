@@ -328,3 +328,23 @@ td.n { direction: ltr; text-align: right; font-feature-settings: 'tnum'; white-s
 .tiers b { display: block; color: var(--brand); font-size: 12.5px }
 .tbl.audit { margin: 0 14px; width: calc(100% - 28px) } .tbl.audit tr.undone td { opacity: .55; text-decoration: line-through }
 .tbl.audit tr.undone td:last-child { text-decoration: none; opacity: 1 }
+
+/* transfer safety check */
+.xrow { cursor: pointer; }
+.xrow:hover { border-color: var(--brand); }
+.xto { display: flex; align-items: center; gap: 10px; padding: 4px 0 2px; }
+.xto .av { width: 38px; height: 38px; border-radius: 50%; background: var(--brand-50); color: var(--brand-800); display: grid; place-items: center; font-weight: 700; flex: none; }
+.xto > span:nth-child(2) { flex: 1; min-width: 0; } .xto small { display: block; color: var(--muted); font-size: 11.5px; }
+.xto > b { font-size: 16px; white-space: nowrap; } .xto > b small { font-size: 11px; color: var(--muted); font-weight: 500; }
+.xalert { background: var(--danger-50); color: #6e1220; border: 1px solid #f3c4cb; border-radius: 14px; padding: 11px 13px; font-size: 12.5px; line-height: 1.7; }
+.xalert > b { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--danger); }
+.xalert .xh { font-weight: 700; margin-top: 8px; font-size: 12px; }
+.xalert p { margin-top: 8px; font-weight: 600; }
+.xalert.big { font-size: 15px; } .xalert.big > b { font-size: 17px; } .xalert.big .xh { font-size: 14px; }
+.xlist { margin: 3px 0 0; padding-inline-start: 18px; } .xlist li { margin: 2px 0; }
+.main.danger { background: var(--danger); }
+.btn.ghost { border-color: transparent; color: var(--muted); justify-content: center; font-size: 12px; }
+.sheet .sb > .btn { justify-content: center; }
+.xack { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; background: var(--warn-50); color: #6d4200; border-radius: 12px; padding: 9px 11px; }
+.pinbox { width: 100%; text-align: center; letter-spacing: 12px; font-size: 24px; border: 1.5px solid var(--line-2); border-radius: 12px; padding: 10px; margin: 6px 0 0; }
+.xscore { font-size: 11px; text-align: center; }

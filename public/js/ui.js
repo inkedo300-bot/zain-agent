@@ -9,6 +9,8 @@ import { startRecording } from './voice.js';
 import { FLOWS, LANES, flowSVG } from './flow.js';
 import { transcribe } from './agent.js';
 import { agentAsk, isOpenQuestion, MAX_STEPS } from './agentloop.js';
+import { checkTransfer, messageFor, styleFor, HIGH, MEDIUM, SIGNALS } from './fraud.js';
+import { DEMO_SHOP, DEMO_CUST, prizeFor, generateTransfers } from './fraud_data.js';
 
 // ── helpers ──
 const $ = (s) => document.querySelector(s);
@@ -27,6 +29,7 @@ const P = {
   send: '<path d="M20 12H6M12 6l-6 6 6 6"/>', back: '<path d="M9 5l7 7-7 7"/>', plus: '<path d="M12 5v14M5 12h14"/>', check: '<path d="M5 12l5 5 9-10"/>', x: '<path d="M6 6l12 12M18 6L6 18"/>',
   in: '<path d="M12 4v13M6 11l6 6 6-6"/>', out: '<path d="M12 20V7M6 13l6-6 6 6"/>', link: '<path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/>',
   info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8v.01"/>', copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 00-1-1H5a1 1 0 00-1 1v10a1 1 0 001 1h3"/>',
+  shield: '<path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
   box: '<path d="M4 8l8-4 8 4v8l-8 4-8-4z"/><path d="M4 8l8 4 8-4M12 12v8"/>',
   wallet: '<rect x="3" y="6" width="18" height="13" rx="3"/><path d="M16 12h3"/><path d="M3 9h14a2 2 0 002-2V6"/>', spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M6 18l2.5-2.5M15.5 8.5L18 6"/>',
 };
@@ -109,6 +112,7 @@ function homeScreen() {
     <button class="tile" data-a="sub" data-k="inventory"><span class="ic">${icon('box')}</span>المخزون${lowN ? `<span class="badge">${lowN}</span>` : ''}</button>
     <button class="tile" data-a="sub" data-k="sup"><span class="ic">${icon('truck')}</span>الموردين${supN ? `<span class="badge">${supN}</span>` : ''}</button>
     <button class="tile" data-a="sub" data-k="notebook"><span class="ic">${icon('camera')}</span>اقرأ صفحة دفتر</button>
+    <button class="tile" data-a="sub" data-k="send"><span class="ic">${icon('shield')}</span>تحويل آمن</button>
   </div>
   <div class="sec">بيع اليوم <a data-a="tab" data-k="book">الدفتر</a></div>
   <div class="list"><div class="row"><span class="ic">${icon('chart', 18)}</span><span class="t"><b>مجموع بيع اليوم</b><small>كاش + محفظة + دين</small></span><span class="a num">${figBtn(today)}</span></div>
@@ -388,7 +392,7 @@ function renderA() {
   FIGS.clear();
   const A = S.A;
   let body;
-  if (A.sub) body = { alerts: alertsScreen, closing: closingScreen, weekly: weeklyScreen, fx: fxScreen, inventory: inventoryScreen, sup: suppliersScreen, notebook: notebookScreen, cust: custScreen }[A.sub]();
+  if (A.sub) body = { alerts: alertsScreen, closing: closingScreen, weekly: weeklyScreen, fx: fxScreen, inventory: inventoryScreen, sup: suppliersScreen, notebook: notebookScreen, cust: custScreen, send: sendScreen }[A.sub]();
   else body = { home: homeScreen, chat: chatScreen, book: bookScreen, debts: debtsScreen, cash: cashScreen }[A.tab]();
   const focused = document.activeElement?.id === 'chatIn';
   const app = $('#appA');
@@ -405,12 +409,91 @@ const toastHTML = (t) => `<div class="ptoast ${t.ok ? 'ok' : ''}"><span class="i
 function toastA(text, sub, o = {}) { S.A.toast = { text, sub, ...o }; renderA(); clearTimeout(toastA.t); toastA.t = setTimeout(() => { S.A.toast = null; renderA(); }, 3200); }
 function toastB(text, sub, o = {}) { S.B.toast = { text, sub, ...o }; renderB(); clearTimeout(toastB.t); toastB.t = setTimeout(() => { S.B.toast = null; renderB(); }, o.long ? 6000 : 3200); }
 
+// ── transfer safety check (fraud.js decides, these only show it) ──
+const S_REPORTED = new Set(); // phones reported in this session → become a «reported» signal next time
+function supplierTransfer(o) {
+  const sp = SUPPLIERS[o.sid];
+  return { amount: orderValue(o, L), note: `فاتورة ${o.id}`, recipient: { name: sp.name, phone: sp.phone, verifiedMerchant: true, accountAgeDays: 900, received30d: 50, spends30d: 40 },
+    sender: { balance: 3200000, pastToRecipient: true, inContacts: true, hour: 11, loginSecondsAgo: 600 } };
+}
+function xferCase(side, id) {
+  if (side === 'a') return structuredClone(DEMO_SHOP.find((d) => d.id === id));
+  const c = customerById(S.B.cid), ageBand = c.ageBand || '30-59';
+  const base = id === 'c_prize' ? { ...DEMO_CUST.find((d) => d.id === id), ...prizeFor(ageBand) } : DEMO_CUST.find((d) => d.id === id);
+  const t = structuredClone(base); t.sender = { ...t.sender, balance: S.bal[S.B.cid], ageBand }; return t;
+}
+function xferOpen(side, id) {
+  const t = xferCase(side, id);
+  if (S_REPORTED.has(t.recipient.phone)) t.recipient.reports = (t.recipient.reports || 0) + 1;
+  const res = checkTransfer(t), style = side === 'a' ? 'normal' : styleFor(t.sender);
+  const x = { kind: 'xfer', id, t, res, style, msg: messageFor(res, { style }), stage: res.level === 'high' ? 'warn' : 'pay', wait: res.level === 'high' ? 10 : 0 };
+  if (side === 'a') S.A.sheet = x; else S.B.sheet = x;
+  event(`فحص تحويل ${fmt(t.amount)} لـ«${t.recipient.name}»: ${res.score}/100 · ${{ none: 'سليم', medium: 'تنبيه خفيف', high: 'توعية كاملة' }[res.level]}${res.hits.length ? ` (${res.hits.map((h) => h.id).join('، ')})` : ''}`, res.level === 'none' ? 'info' : 'warn');
+  flowMark('xfer', res.level === 'high' ? 'x5' : res.level === 'medium' ? 'x4' : 'x3', `${t.recipient.name}: ${res.score} من 100`);
+  side === 'a' ? renderA() : renderB();
+  clearInterval(xferOpen.timer);
+  if (x.wait) xferOpen.timer = setInterval(() => {
+    x.wait = Math.max(0, x.wait - 1); const btn = document.getElementById('xferGoOn_' + side);
+    if (btn) { btn.disabled = x.wait > 0; btn.textContent = x.wait ? `أنا متأكد، أريد أكمل (${x.wait})` : 'أنا متأكد، أريد أكمل'; }
+    if (!x.wait) clearInterval(xferOpen.timer);
+  }, 1000);
+}
+function xferSheet(x, side) {
+  const d = side === 'a' ? 'data-a' : 'data-b', t = x.t, m = x.msg, simple = x.style === 'simple';
+  const list = (arr) => `<ul class="xlist">${arr.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>`;
+  const head = `<div class="xto"><span class="av">${initials(t.recipient.name)}</span><span><b>${esc(t.recipient.name)}</b><small class="ltr">${esc(t.recipient.phone)}</small></span><b class="num">${fmt(t.amount)} <small>د.ع</small></b></div>${t.note ? `<div class="pnote">الملاحظة: ${esc(t.note)}</div>` : ''}`;
+  const score = simple ? '' : `<div class="pnote xscore">درجة الخطر ${x.res.score} من 100 · تنبيه خفيف من ${MEDIUM}، وتوعية كاملة فوق ${HIGH}. يحسبها الكود، مو النموذج.</div>`;
+  let body;
+  if (x.stage === 'warn') body = `${head}
+    <div class="xalert ${simple ? 'big' : ''}"><b>${icon('alert', 18)} ${esc(m.title)}</b>
+      <div class="xh">ليش؟</div>${list(m.reasons)}<div class="xh">شنو تسوي؟</div>${list(m.advice)}${m.footer ? `<p>${esc(m.footer)}</p>` : ''}</div>
+    <button class="main danger" ${d}="xferCancel">ألغِ التحويل</button>
+    <button class="btn" ${d}="xferReport">بلّغ عن هذا الرقم</button>
+    <button class="btn ghost" id="xferGoOn_${side}" ${d}="xferGoOn" ${x.wait ? 'disabled' : ''}>أنا متأكد، أريد أكمل${x.wait ? ` (${x.wait})` : ''}</button>${score}`;
+  else body = `${head}
+    ${x.res.level === 'none' ? `<div class="note ok">${icon('shield', 14)}<span>فحصنا التحويل وما لگينا شي يقلق.</span></div>`
+      : x.res.level === 'medium' ? `<div class="note warn">${icon('alert', 14)}<span><b>${esc(m.title)}:</b> ${esc(m.reasons.join('، '))}.${m.advice.length ? `<br>${esc(m.advice.join(' '))}` : ''}</span></div>`
+      : `<label class="xack"><input type="checkbox" id="xferAck_${side}"> تأكدت من صاحب الرقم بنفسي، مو من مكالمة أو رسالة</label>`}
+    ${side === 'a' ? `<input id="xferPin" type="password" inputmode="numeric" maxlength="4" placeholder="••••" class="pinbox"><div class="pnote" style="text-align:center">للتجربة: 1234</div>` : ''}
+    <button class="main" ${d}="xferGo">حوّل ${fmt(t.amount)} د.ع</button>${x.res.level === 'none' ? '' : `<button class="btn" ${d}="xferCancel">ألغِ</button>`}${score}`;
+  return `<div class="sheet-bg" ${d}="closeSheet"><div class="sheet"><div class="grab"></div><div class="sh"><b>${icon('shield', 16)} تحويل</b><button class="btn sm" ${d}="closeSheet">سد</button></div><div class="sb">${body}</div></div></div>`;
+}
+function xferAct(side, k) {
+  const x = side === 'a' ? S.A.sheet : S.B.sheet; if (!x || x.kind !== 'xfer') return;
+  const who = side === 'a' ? 'التاجر' : customerById(S.B.cid).name, toast = side === 'a' ? toastA : toastB, t = x.t;
+  const close = () => { clearInterval(xferOpen.timer); if (side === 'a') S.A.sheet = null; else S.B.sheet = null; };
+  const tier = `فحص التحويل ${x.res.score}/100`;
+  if (k === 'xferCancel') { close(); audit({ action: 'إلغاء تحويل بعد التنبيه', detail: `${t.recipient.name} · ${fmt(t.amount)} د.ع`, by: who, model: '—', tier }); event(`${who} لغى تحويل ${fmt(t.amount)} لـ«${t.recipient.name}» بعد التنبيه.`); flowMark('xfer', 'x7', 'انلغى التحويل'); toast('انلغى التحويل', 'فلوسك بأمان', { ok: true, icon: 'shield' }); }
+  else if (k === 'xferReport') { close(); S_REPORTED.add(t.recipient.phone); audit({ action: 'بلاغ عن رقم', detail: `${t.recipient.name} · ${t.recipient.phone}`, by: who, model: '—', tier }); event(`${who} بلّغ عن ${t.recipient.phone}. أي تحويل جاي لنفس الرقم ياخذ إشارة «عليه بلاغات».`, 'warn'); flowMark('xfer', 'x7', 'انسجل البلاغ'); toast('وصل البلاغ وانلغى التحويل', 'شكراً، هذا يحمي غيرك', { ok: true, icon: 'shield' }); }
+  else if (k === 'xferGoOn') { if (x.wait) return; x.stage = 'pay'; }
+  else if (k === 'xferGo') {
+    if (x.res.level === 'high' && !document.getElementById('xferAck_' + side)?.checked) { toast('أكّد إنك تأكدت بنفسك أول'); return; }
+    if (side === 'a' && $('#xferPin')?.value !== PIN) { toast('الرمز غلط', 'للتجربة: 1234'); return; }
+    close(); if (side === 'b') S.bal[S.B.cid] -= t.amount;
+    audit({ action: x.res.level === 'none' ? 'تحويل' : 'تحويل بعد تنبيه', detail: `${t.recipient.name} · ${fmt(t.amount)} د.ع`, by: who, model: '—', tier: `${tier} · ${side === 'a' ? 'رمز PIN' : 'تأكيد'}` });
+    event(`${who} حوّل ${fmt(t.amount)} لـ«${t.recipient.name}»${x.res.level === 'none' ? '' : ' رغم التنبيه'} (تحويل تجريبي، ما ينحسب بالدفتر).`);
+    toast('انرسل التحويل', `${fmt(t.amount)} د.ع · تجريبي`, { ok: true, icon: 'check' });
+  }
+  side === 'a' ? renderA() : renderB();
+}
+function sendScreen() {
+  return `${appbar('تحويل آمن', 'كل تحويل ينفحص قبل لا يطلع')}
+  <div class="scroll"><div class="pad">
+    <div class="note info">${icon('shield', 14)}<span>قبل ما تطلع الفلوس، نشوف ${SIGNALS.length} علامة عن المستلم وعن التحويل نفسه. إذا أكو خطر نگلك السبب وشنو تسوي، والقرار الأخير إلك.</span></div>
+    <div class="sec" style="padding:10px 0 6px">جرّب موقف</div>
+    <div class="list" style="padding:0">${DEMO_SHOP.map((d) => `<button class="row xrow" data-a="xferPick" data-id="${d.id}"><span class="ic">${icon('out', 18)}</span><span class="t"><b>${esc(d.label)}</b><small>${esc(d.hint)}</small></span><span class="a num">${fmt(d.amount)}</span></button>`).join('')}</div>
+    ${S_REPORTED.size ? `<div class="box" style="margin-top:10px"><h4>أرقام بلّغت عنها</h4>${[...S_REPORTED].map((p) => `<div class="srcrow"><span class="ltr">${esc(p)}</span><b>بلاغ</b></div>`).join('')}</div>` : ''}
+  </div></div>`;
+}
+
 // ── sheets (in phone A) ──
 function sheetHTML(sh) {
+  if (sh.kind === 'xfer') return xferSheet(sh, 'a');
   if (sh.kind === 'pin') {
     const o = S.orders.find((x) => x.id === sh.order);
     return `<div class="sheet-bg" data-a="closeSheet"><div class="sheet"><div class="grab"></div><div class="sh"><b>${icon('lock', 16)} تأكيد الدفع</b><button class="btn sm" data-a="closeSheet">إلغاء</button></div>
       <div class="sb"><p>ادفع <b class="num">${fmt(orderValue(o, L))} د.ع</b> لـ${esc(SUPPLIERS[o.sid].short)} ${sh.ch === 'wallet' ? 'من المحفظة' : 'كاش'}.</p>
+      ${(() => { const r = checkTransfer(supplierTransfer(o)); return r.level === 'none' ? `<div class="note ok">${icon('shield', 14)}<span>فحص التحويل: مورد معروف وحسابه موثّق، ما أكو علامات خطر.</span></div>` : `<div class="note warn">${icon('shield', 14)}<span>${esc(r.hits.map((h) => h.ar).join('، '))}</span></div>`; })()}
       <div class="pnote">أي فلوس تطلع من المحل تحتاج رمزك، حتى لو الوكيل هو اللي جهّز العملية.</div>
       <input id="pinIn" type="password" inputmode="numeric" maxlength="4" placeholder="••••" style="width:100%;text-align:center;letter-spacing:12px;font-size:24px;border:1.5px solid var(--line-2);border-radius:12px;padding:10px;margin:10px 0">
       <button class="main" data-a="pinOk">ادفع</button><div class="pnote" style="text-align:center">للتجربة: 1234</div></div></div></div>`;
@@ -463,8 +546,9 @@ function renderB() {
   $('#appB').innerHTML = `<div class="scroll"><div class="whero"><small>محفظتي · ${esc(c.full)}</small><div class="bal num">${fmt(S.bal[cid])}<span>د.ع</span></div></div>
     <div class="shopdebt"><div class="top"><span class="av">${initials(SHOP.owner)}</span><span style="flex:1"><b>${SHOP.name}</b><small>${b.balance ? `بذمتك ${fmt(b.balance)} د.ع` : 'ما بذمتك شي'}</small></span>${b.balance ? `<button class="btn sm primary" data-b="pay" data-amt="${b.balance}">ادفع</button>` : ''}</div>
       ${b.open.length ? `<div style="margin-top:8px">${b.open.slice(-3).map((d) => `<div class="srcrow"><span>${dateAr(d.date)}<small>${esc(describeItems(L.byId(d.id)))}</small></span><b class="num">${fmt(d.left)}</b></div>`).join('')}</div>` : ''}</div>
+    <div class="sec">حوّل فلوس</div><div class="list">${DEMO_CUST.map((d) => `<button class="row xrow" data-b="xferPick" data-id="${d.id}"><span class="ic">${icon('out', 18)}</span><span class="t"><b>${esc(d.label)}</b><small>${esc(d.hint)}</small></span><span class="a num">${fmt(d.amount)}</span></button>`).join('')}</div>
     <div class="sec">الإشعارات</div><div class="list">${notes.map(card).join('') || '<div class="ncard"><p>ماكو إشعارات.</p></div>'}</div></div>
-    ${S.B.sheet ? `<div class="sheet-bg" data-b="closeSheet"><div class="sheet"><div class="grab"></div><div class="sh"><b>ادفع لـ${SHOP.name}</b><button class="btn sm" data-b="closeSheet">سد</button></div>
+    ${S.B.sheet?.kind === 'xfer' ? xferSheet(S.B.sheet, 'b') : S.B.sheet ? `<div class="sheet-bg" data-b="closeSheet"><div class="sheet"><div class="grab"></div><div class="sh"><b>ادفع لـ${SHOP.name}</b><button class="btn sm" data-b="closeSheet">سد</button></div>
       <div class="sb"><div class="field">المبلغ<input id="payAmt" type="number" step="250" value="${S.B.sheet.amt || ''}" placeholder="${fmt(b.balance)}"></div><div class="pnote">رصيدك ${fmt(S.bal[cid])} د.ع. الدفعة توصل للمحل ومعها رقم الدين، فتتطابق وحدها.</div>
       <button class="main" data-b="payGo">ادفع</button></div></div></div>` : ''}
     ${S.B.toast ? toastHTML(S.B.toast) : ''}`;
@@ -587,7 +671,23 @@ function panelEval() {
       <div class="metric"><small>التوقع أدق من الطريقة البسيطة</small><b class="num">${s.backtest.improvement}%</b><em>غلبها بـ${s.backtest.beatNaive}/${s.seeds} محل</em></div></div>
     <table class="tbl"><tr><th>النوع</th><th>مزروع</th><th>انكشف</th><th>إنذار غلط</th></tr>${Object.entries(s.anomalies.perKind).map(([k, v]) => `<tr><td>${KIND_AR[k] || k}</td><td class="n">${v.planted}</td><td class="n">${v.found}</td><td class="n">${v.fp}</td></tr>`).join('')}</table>
     <div class="pnote" style="margin-top:8px">أضعف نقطة: «دين متأخر» ينكشف بنص الحالات، لأن زبون بطيء أصلاً ما يبين متأخر عن عادته. التوقع: معدل الخطأ اليومي ${fmt(s.backtest.maeModel)} مقابل ${fmt(s.backtest.maeNaive)} للطريقة البسيطة.</div>` : ''}
+  ${fraudEvalHTML()}
   ${!o && !s ? '<div class="empty">اضغط «شغّل».</div>' : ''}`;
+}
+function fraudEvalHTML() {
+  const f = (fraudEvalHTML.r ??= (() => {
+    const set = generateTransfers(22, 400).map((t) => ({ t, r: checkTransfer(t) }));
+    const sc = set.filter((x) => x.t.scam), ok = set.filter((x) => !x.t.scam);
+    let flips = 0; for (const { t, r } of set) for (const ageBand of ['18-29', '30-59', '60+']) if (checkTransfer({ ...t, sender: { ...t.sender, ageBand } }).score !== r.score) flips++;
+    return { sc: sc.length, ok: ok.length, any: sc.filter((x) => x.r.level !== 'none').length, full: sc.filter((x) => x.r.level === 'high').length, okFull: ok.filter((x) => x.r.level === 'high').length, okLight: ok.filter((x) => x.r.level === 'medium').length, flips, n: set.length };
+  })());
+  const pct = (a, b) => `${Math.round((a / b) * 100)}%`;
+  return `<div class="subh">فحص التحويل على ${f.n} تحويل مولّد (مجموعة محجوبة، ${f.sc} احتيال)</div><div class="metrics">
+    <div class="metric"><small>احتيال طلع عليه تنبيه</small><b class="num">${pct(f.any, f.sc)}</b><em>${f.any} من ${f.sc} · كامل: ${f.full}</em></div>
+    <div class="metric"><small>تحويل سليم طلعت عليه توعية كاملة</small><b class="num">${pct(f.okFull, f.ok)}</b><em>${f.okFull} من ${f.ok}</em></div>
+    <div class="metric"><small>تحويل سليم طلع عليه تنبيه خفيف</small><b class="num">${pct(f.okLight, f.ok)}</b><em>${f.okLight} من ${f.ok}</em></div>
+    <div class="metric"><small>تغيير عمر المرسل غيّر القرار</small><b class="num">${f.flips}</b><em>بكل ${f.n * 3} تجربة</em></div></div>
+  <div class="pnote">إحنا كتبنا السيناريوهات والقواعد، فهذا يثبت إن القواعد تشتغل مثل ما صممناها، مو دقتها بالواقع. الدقة الحقيقية تحتاج بلاغات زين كاش الفعلية.</div>`;
 }
 const KIND_AR = { shrinkage: 'نقص بالجرد', duplicate_payment: 'دفعة مورد مكررة', low_day: 'يوم مبيعات واطي', price_jump: 'المورد رفع السعر', below_cost: 'مادة تنباع بخسارة', overdue: 'دين متأخر', unmatched_in: 'تحويل بدون زبون', odd_refund: 'إرجاع غريب', cash_short: 'نقص بالكاش', disputed: 'دين معترض عليه' };
 function panelData() {
@@ -608,6 +708,7 @@ function panelHow() {
     <div class="blk"><b>الدفتر يحسب:</b> 11 أداة (مبيعات، ربح، ديون، زبون، مواد، مصاريف، دولار، رصيد، توقع، شذوذات، طلبية). كل رقم يطلع ومعه أرقام القيود اللي انحسب منها.</div><div class="arrow">↓</div>
     <div class="blk"><b>Gemini يشرح:</b> يصيغ الجواب باللهجة. المدقق يرفض أي رقم مو موجود بنتيجة الأداة، وإلا نستخدم القالب.</div><div class="arrow">↓</div>
     <div class="blk"><b>المخزون والموردين:</b> المخزون = الموجود + البضاعة المدفوعة − المبيوع ± الجرد. لما مادة تقرب تخلص (أقل من مدة التوصيل + يومين)، تنجهز طلبية تكفي 10 أيام. إذا الطلب التلقائي مفعّل وتحت الحد، تنرسل وحدها لمحفظة المورد، وإلا تنتظر موافقتك. المورد يقبل أو يعدّل أو يرفض، ويسلّم بفاتورة، وتدفعها بالمحفظة فتدخل الدفتر.</div><div class="arrow">↓</div>
+    <div class="blk"><b>فحص التحويل:</b> قبل أي فلوس تطلع، 22 إشارة عن المستلم وعن التحويل (بلاغات، حساب جديد، فلوس تطلع منه بدقائق، اسم يدّعي إنه زين كاش، مكالمة شغالة، رمز تحقق انطلب قبل دقائق…). المجموع من 30 تنبيه خفيف، وفوق 60 شاشة توعية. الكود يقرر مو النموذج، وعمر المرسل يغيّر الكلام بس، مو القرار.</div><div class="arrow">↓</div>
     <div class="blk"><b>التاجر يقرر:</b> القيود تنحفظ بعد تأكيده، والتذكير والطلبية ما تنرسل إلا بموافقته، والزبون يأكد أو يعترض من محفظته.</div></div>
   <div class="subh">أنواع الأعطال وشلون نتعامل وياها</div>
   <table class="tbl"><tr><th>العطل</th><th>التعامل</th></tr>
@@ -826,6 +927,8 @@ document.addEventListener('click', async (ev) => {
       case 'manualOrder': { const sid = a.dataset.id; const r = L.reorder({ incoming: incomingOf(S.orders) }); const items = r.bySup[sid].filter((i) => i.order > 0).map((i) => ({ sku: i.sku, qty: i.order })); const o = makeOrder(sid, items); S.orders.push(o); sentOrder(o, 'بعد موافقتك'); renderA(); break; }
       case 'sendDraft': { const o = S.orders.find((x) => x.id === a.dataset.id); o.status = 'sent'; sentOrder(o, 'بعد موافقتك'); renderA(); break; }
       case 'cancelOrder': { const o = S.orders.find((x) => x.id === a.dataset.id); o.status = 'cancelled'; event(`لغيت طلبية ${o.id}.`); renderA(); break; }
+      case 'xferPick': xferOpen('a', a.dataset.id); break;
+      case 'xferCancel': case 'xferReport': case 'xferGoOn': case 'xferGo': xferAct('a', k); break;
       case 'payInv': { A.sheet = { kind: 'pin', order: a.dataset.id, ch: a.dataset.ch }; renderA(); setTimeout(() => $('#pinIn')?.focus(), 30); break; }
       case 'pinOk': {
         const sh = A.sheet; if ($('#pinIn').value !== PIN) { toastA('الرمز غلط', 'للتجربة: 1234'); break; }
@@ -905,6 +1008,8 @@ document.addEventListener('click', async (ev) => {
         supReply(o, `${SUPPLIERS[o.sid].short} سلّم طلبية ${o.id} وأرسل فاتورة ${fmt(orderValue(o, L))} د.ع.${up.length ? ' انتبه: اكو سعر أعلى من آخر مرة.' : ''}`, !!up.length); break;
       }
       case 'closeSheet': if (ev.target === b || b.tagName === 'BUTTON') { S.B.sheet = null; renderB(); } break;
+      case 'xferPick': xferOpen('b', b.dataset.id); break;
+      case 'xferCancel': case 'xferReport': case 'xferGoOn': case 'xferGo': xferAct('b', k); break;
       case 'payGo': {
         const amt = +$('#payAmt').value; const book = L.debtBook()[cid];
         if (!amt || amt <= 0) break;

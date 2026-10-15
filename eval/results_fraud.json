@@ -1,0 +1,191 @@
+{
+  "target": {
+    "caught_any": 85,
+    "normal_full": 2,
+    "normal_light": 25
+  },
+  "results": [
+    {
+      "set": "dev",
+      "seed": 11,
+      "n": 400,
+      "scams": 110,
+      "normal": 290,
+      "caught_any": 100,
+      "caught_full": 85,
+      "normal_full": 3,
+      "normal_light": 61,
+      "age_flip_changes": 0,
+      "warned_by_age": {
+        "18-29": "21/85 (24.7%)",
+        "60+": "24/99 (24.2%)",
+        "30-59": "19/106 (17.9%)"
+      },
+      "kinds": {
+        "new_person": {
+          "scam": false,
+          "n": 56,
+          "full": 0,
+          "light": 15
+        },
+        "new_legit_account": {
+          "scam": false,
+          "n": 34,
+          "full": 3,
+          "light": 31
+        },
+        "mule": {
+          "scam": true,
+          "n": 22,
+          "full": 21,
+          "light": 1
+        },
+        "shop": {
+          "scam": false,
+          "n": 48,
+          "full": 0,
+          "light": 7
+        },
+        "known": {
+          "scam": false,
+          "n": 127,
+          "full": 0,
+          "light": 7
+        },
+        "takeover": {
+          "scam": true,
+          "n": 14,
+          "full": 12,
+          "light": 2
+        },
+        "support": {
+          "scam": true,
+          "n": 20,
+          "full": 20,
+          "light": 0
+        },
+        "family": {
+          "scam": false,
+          "n": 25,
+          "full": 0,
+          "light": 1
+        },
+        "supplier_switch": {
+          "scam": true,
+          "n": 20,
+          "full": 17,
+          "light": 3
+        },
+        "quiet": {
+          "scam": true,
+          "n": 19,
+          "full": 4,
+          "light": 5
+        },
+        "family_emergency": {
+          "scam": true,
+          "n": 15,
+          "full": 11,
+          "light": 4
+        }
+      },
+      "rates": {
+        "caught_any": 90.9,
+        "caught_full": 77.3,
+        "normal_full": 1,
+        "normal_light": 21
+      }
+    },
+    {
+      "set": "held",
+      "seed": 22,
+      "n": 400,
+      "scams": 108,
+      "normal": 292,
+      "caught_any": 95,
+      "caught_full": 72,
+      "normal_full": 0,
+      "normal_light": 58,
+      "age_flip_changes": 0,
+      "warned_by_age": {
+        "18-29": "22/107 (20.6%)",
+        "30-59": "15/88 (17%)",
+        "60+": "21/97 (21.6%)"
+      },
+      "kinds": {
+        "known": {
+          "scam": false,
+          "n": 132,
+          "full": 0,
+          "light": 10
+        },
+        "shop": {
+          "scam": false,
+          "n": 48,
+          "full": 0,
+          "light": 10
+        },
+        "new_person": {
+          "scam": false,
+          "n": 56,
+          "full": 0,
+          "light": 11
+        },
+        "quiet": {
+          "scam": true,
+          "n": 9,
+          "full": 0,
+          "light": 0
+        },
+        "mule": {
+          "scam": true,
+          "n": 18,
+          "full": 16,
+          "light": 2
+        },
+        "takeover": {
+          "scam": true,
+          "n": 16,
+          "full": 9,
+          "light": 6
+        },
+        "new_legit_account": {
+          "scam": false,
+          "n": 23,
+          "full": 0,
+          "light": 23
+        },
+        "supplier_switch": {
+          "scam": true,
+          "n": 23,
+          "full": 15,
+          "light": 8
+        },
+        "family_emergency": {
+          "scam": true,
+          "n": 19,
+          "full": 9,
+          "light": 7
+        },
+        "family": {
+          "scam": false,
+          "n": 33,
+          "full": 0,
+          "light": 4
+        },
+        "support": {
+          "scam": true,
+          "n": 23,
+          "full": 23,
+          "light": 0
+        }
+      },
+      "rates": {
+        "caught_any": 88,
+        "caught_full": 66.7,
+        "normal_full": 0,
+        "normal_light": 19.9
+      }
+    }
+  ]
+}

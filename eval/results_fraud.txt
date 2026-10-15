@@ -1,0 +1,54 @@
+
+── dev (seed 11): 110 scams, 290 honest transfers
+scams with any warning : 100/110 (90.9%)  target ≥ 85%
+scams with full warning: 85/110 (77.3%)
+honest → full warning  : 3/290 (1%)  target ≤ 2%
+honest → light warning : 61/290 (21%)  target ≤ 25%
+age band flipped on every case → changes: 0 (must be 0)
+honest transfers warned, by age band: {
+  '18-29': '21/85 (24.7%)',
+  '60+': '24/99 (24.2%)',
+  '30-59': '19/106 (17.9%)'
+}
+┌───────────────────┬───────┬─────┬──────┬───────┐
+│ (index)           │ scam  │ n   │ full │ light │
+├───────────────────┼───────┼─────┼──────┼───────┤
+│ new_person        │ false │ 56  │ 0    │ 15    │
+│ new_legit_account │ false │ 34  │ 3    │ 31    │
+│ mule              │ true  │ 22  │ 21   │ 1     │
+│ shop              │ false │ 48  │ 0    │ 7     │
+│ known             │ false │ 127 │ 0    │ 7     │
+│ takeover          │ true  │ 14  │ 12   │ 2     │
+│ support           │ true  │ 20  │ 20   │ 0     │
+│ family            │ false │ 25  │ 0    │ 1     │
+│ supplier_switch   │ true  │ 20  │ 17   │ 3     │
+│ quiet             │ true  │ 19  │ 4    │ 5     │
+│ family_emergency  │ true  │ 15  │ 11   │ 4     │
+└───────────────────┴───────┴─────┴──────┴───────┘
+
+── held (seed 22): 108 scams, 292 honest transfers
+scams with any warning : 95/108 (88%)  target ≥ 85%
+scams with full warning: 72/108 (66.7%)
+honest → full warning  : 0/292 (0%)  target ≤ 2%
+honest → light warning : 58/292 (19.9%)  target ≤ 25%
+age band flipped on every case → changes: 0 (must be 0)
+honest transfers warned, by age band: {
+  '18-29': '22/107 (20.6%)',
+  '30-59': '15/88 (17%)',
+  '60+': '21/97 (21.6%)'
+}
+┌───────────────────┬───────┬─────┬──────┬───────┐
+│ (index)           │ scam  │ n   │ full │ light │
+├───────────────────┼───────┼─────┼──────┼───────┤
+│ known             │ false │ 132 │ 0    │ 10    │
+│ shop              │ false │ 48  │ 0    │ 10    │
+│ new_person        │ false │ 56  │ 0    │ 11    │
+│ quiet             │ true  │ 9   │ 0    │ 0     │
+│ mule              │ true  │ 18  │ 16   │ 2     │
+│ takeover          │ true  │ 16  │ 9    │ 6     │
+│ new_legit_account │ false │ 23  │ 0    │ 23    │
+│ supplier_switch   │ true  │ 23  │ 15   │ 8     │
+│ family_emergency  │ true  │ 19  │ 9    │ 7     │
+│ family            │ false │ 33  │ 0    │ 4     │
+│ support           │ true  │ 23  │ 23   │ 0     │
+└───────────────────┴───────┴─────┴──────┴───────┘
