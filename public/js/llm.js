@@ -1,4 +1,4 @@
-// Client for the local /api/llm proxy (Gemini). The key stays on the local server,
+// Client for the local /api/llm proxy (Gemini, or Groq for text when configured). The key stays on the local server,
 // or — if the user pasted one in Settings — is sent only to that local server.
 let status = { checked: false, ok: false };
 const KEY = 'daftar.geminiKey';
@@ -11,7 +11,7 @@ export async function health(force = false) {
   try {
     const r = await fetch('/api/health', { headers: headers(), cache: 'no-store' });
     const j = await r.json();
-    status = { checked: true, ok: !!j.llm, model: j.model, keySource: j.keySource };
+    status = { checked: true, ok: !!j.llm, model: j.model, provider: j.provider, media: j.media, providers: j.providers, keySource: j.keySource };
   } catch { status = { checked: true, ok: false }; }
   return status;
 }
@@ -28,7 +28,7 @@ export async function callLLM({ system, messages, images = [], maxTokens = 700, 
       body: JSON.stringify({ system, messages, images, max_tokens: maxTokens, json, tier }) });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || 'llm_http_' + r.status);
-    return { text: j.text, ms: Math.round(performance.now() - t0), model: j.model };
+    return { text: j.text, ms: Math.round(performance.now() - t0), model: j.model, provider: j.provider, cached: !!j.cached };
   } finally { clearTimeout(t); }
 }
 export function extractJSON(text) {

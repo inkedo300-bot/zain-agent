@@ -286,7 +286,7 @@ const STT_FIX = [[/محزن/g, "مخزن"], [/هال(أسماء|اسماء|سم�
 export function cleanTranscript(t) { let s = (t || '').trim(); for (const [re, to] of STT_FIX) s = s.replace(re, to); return s.trim(); }
 export async function transcribe(dataUrl) {
   let ms = 0, out = '';
-  for (const tier of ['strong', 'fast']) { // an empty result gets one more try on the other model
+  for (const tier of ['media', 'strong']) { // Flash-Lite first (500/day free); an empty result gets one try on Flash
     const r = await callLLM({ system: STT, messages: [{ role: 'user', content: STT_ASK }], images: [dataUrl], json: true, maxTokens: 200, timeoutMs: 30000, tier });
     ms += r.ms || 0;
     out = cleanTranscript(extractJSON(r.text)?.text);
