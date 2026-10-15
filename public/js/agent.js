@@ -8,6 +8,7 @@
 import { Ledger, period } from './ledger.js';
 import { routeOffline, parseEntryOffline, looksLikeEntry, detectAction, stripVocative } from './nlu.js';
 import { callLLM, extractJSON, llmStatus } from './llm.js';
+import { mask, unmask, nameOfCode, CUSTOMER_CODES } from './privacy.js';
 import { CUSTOMERS, PRODUCTS, SUPPLIERS, productBySku, customerById, fmt, dateAr, TODAY, SHOP, daysBetween, addDays, dom } from './data.js';
 
 export const ACTIONS = ['remind', 'order'];
@@ -19,7 +20,7 @@ const ROUTER = `أنت موجّه أسئلة داخل تطبيق دفتر حسا
 - sales {period, arg?, channel: all|cash|wallet|credit} : المبيعات
 - profit {period, arg?} : الربح (المبيعات ناقص كلفة البضاعة والمصاريف)
 - debts {} : منو مطلوب ومجموع الديون
-- customer {name} : شكد مطلوب من زبون معيّن. الأسماء الموجودة: ${CUSTOMERS.map((c) => c.name).join('، ')}
+- customer {name} : شكد مطلوب من زبون معيّن. أسماء الزبائن مخفية برموز (${CUSTOMER_CODES.join('، ')})؛ حط الرمز نفسه بـ name. إذا انذكر اسم شخص بدون رمز فهو مو من زبائن الدفتر
 - topItems {period, arg?, sku?} : أكثر المواد ربحاً أو ربح مادة معيّنة. المواد: ${PRODUCTS.map((p) => `${p.sku}=${p.name}`).join('، ')}
 - expenses {period, arg?, category?: rent|gen|wage|draw} : المصاريف
 - fxImpact {period} : تأثير سعر الدولار
@@ -29,14 +30,14 @@ const ROUTER = `أنت موجّه أسئلة داخل تطبيق دفتر حسا
 - reorder {} : شنو أطلب من الموردين
 - inventory {sku?} : المخزون: شكد باقي من مادة، أو شنو قرب يخلص
 أوامر (صاحب المحل يريد تنسوي شغلة، مو يسأل):
-- remind {name|null} : ذكّر زبون بدينه وأرسله رابط دفع (مثل «ذكّر أم زينب»، «دزله رابط دفع»)
+- remind {name: رمز الزبون|null} : ذكّر زبون بدينه وأرسله رابط دفع (مثل «ذكّر C2»، «دزله رابط دفع»)
 - order {supplier: S1|S2|S3|null} : سوّي طلبية لمورد. الموردين: ${Object.values(SUPPLIERS).map((x) => `${x.id}=${x.short}`).join('، ')}
 الكلام ممكن يبدأ بنداء مثل «علي» أو «حبيبي»، تجاهله.
 period واحد من: ${PERIODS.join(', ')}. إذا period=month فـ arg رقم الشهر (1-12). اليوم ${TODAY}. البيانات موجودة بس لآخر 90 يوم.
 إذا السؤال عن زبون أو مادة مو موجودة بالقوائم، أو عن فترة قبل 90 يوم، أو ما إله علاقة بالمحل: أرجع {"refuse":true,"reason":"unknown_customer|unknown_product|out_of_range|offtopic"}.
 أرجع JSON فقط: {"tool":"...","args":{...}}`;
 
-const WRITER = `أنت مساعد صاحب بقالة عراقية اسمه ${SHOP.owner} (تحچي وياه هو، مو ويا الزبون، ولا تخترع أسماء). اكتب جواب قصير (جملتين أو ثلاث) باللهجة العراقية البسيطة، بدون مصطلحات محاسبية، بدون تنسيق Markdown، وبدون ما تذكر إنك ذكاء اصطناعي. اكتب التواريخ بالكلام مثل «4 أيلول».
+const WRITER = `أنت مساعد صاحب بقالة عراقية اسمه ${SHOP.owner} (تحچي وياه هو، مو ويا الزبون، ولا تخترع أسماء). أسماء الزبائن مخفية برموز مثل C2: اكتب الرمز نفسه بالجواب. اكتب جواب قصير (جملتين أو ثلاث) باللهجة العراقية البسيطة، بدون مصطلحات محاسبية، بدون تنسيق Markdown، وبدون ما تذكر إنك ذكاء اصطناعي. اكتب التواريخ بالكلام مثل «4 أيلول».
 القاعدة الأهم: استخدم فقط الأرقام الموجودة بنتيجة الأداة، واكتبها بالأرقام مع فواصل مثل 1,250,000. ممنوع تجمع أو تطرح أو تحسب نسبة أو تقرّب لرقم جديد.
 ممنوع تذكر أي معلومة مو موجودة بنتيجة الأداة: لا تنسب كلام أو وعد أو رد أو شعور لأي زبون أو مورد، ولا تگول إنك أرسلت أو ذكّرت أو سجلت شي، لأن إنت بس تجاوب. ولا تضيف فترة زمنية (مثل «هالأسبوع») إذا مو موجودة بالنتيجة.
 إذا الرقم تقدير (توقع) گول «متوقع» أو «تقريباً». أرجع JSON فقط: {"answer":"..."}`;
@@ -76,10 +77,13 @@ export async function route(q, { useLLM = true } = {}) {
   const off = routeOffline(q);
   if (useLLM && llmStatus().ok) {
     try {
-      const { text, ms } = await callLLM({ system: ROUTER, messages: [{ role: 'user', content: q }], json: true, maxTokens: 200, timeoutMs: 12000 });
+      const sent = mask(q);
+      const { text, ms } = await callLLM({ system: ROUTER, messages: [{ role: 'user', content: sent }], json: true, maxTokens: 200, timeoutMs: 12000 });
       const j = extractJSON(text);
-      if (validRoute(j)) return { route: j, source: 'gemini', ms, offline: off };
-      return { route: off, source: 'offline', fallback: 'رد النموذج ما اجتاز التحقق', raw: text, offline: off };
+      if (j?.args?.name && /^C\d+$/.test(j.args.name)) j.args.name = nameOfCode(j.args.name) || j.args.name;
+      if (j) j.sent = sent;
+      if (validRoute(j)) { const sent = j.sent; delete j.sent; return { route: j, source: 'gemini', ms, offline: off, sent }; }
+      return { route: off, source: 'offline', fallback: 'رد النموذج ما اجتاز التحقق', raw: text, offline: off, sent };
     } catch (e) { return { route: off, source: 'offline', fallback: friendlyErr(e), offline: off }; }
   }
   return { route: off, source: 'offline', offline: off };
@@ -224,6 +228,7 @@ export async function ask(L, q, { useLLM = true } = {}) {
   if (act) { trace.push({ step: 'فهم الأمر', source: 'offline', detail: act }); return { q, route: act, routeSource: 'offline', action: act, trace, ms: Math.round(performance.now() - t0) }; }
   const rt = await route(q, { useLLM });
   trace.push({ step: 'فهم السؤال', source: rt.source, ms: rt.ms, detail: rt.route, fallback: rt.fallback });
+  if (rt.sent) trace.push({ step: 'الخصوصية', sent: rt.sent });
   const r = rt.route;
   if (ACTIONS.includes(r?.tool)) return { q, route: r, routeSource: rt.source, action: r, trace, ms: Math.round(performance.now() - t0) };
   const res = runTool(L, r);
@@ -232,8 +237,9 @@ export async function ask(L, q, { useLLM = true } = {}) {
   let answer = tmpl, answerSource = 'template', problems = [];
   if (useLLM && llmStatus().ok && res && !res.empty) {
     try {
-      const { text, ms } = await callLLM({ system: WRITER, messages: [{ role: 'user', content: `السؤال: ${q}\nنتيجة الأداة ${r.tool}: ${compact(res)}` }], json: true, maxTokens: 400, timeoutMs: 12000 });
+      const { text, ms } = await callLLM({ system: WRITER, messages: [{ role: 'user', content: mask(`السؤال: ${q}\nنتيجة الأداة ${r.tool}: ${compact(res)}`) }], json: true, maxTokens: 400, timeoutMs: 12000 });
       const j = extractJSON(text);
+      if (j?.answer) j.answer = unmask(j.answer);
       if (j?.answer) {
         problems = validateAnswer(j.answer, res, r);
         if (!problems.length) { answer = j.answer; answerSource = 'gemini'; }
@@ -247,18 +253,18 @@ export async function ask(L, q, { useLLM = true } = {}) {
 
 // ── entries from free text ──
 const ENTRY = `استخرج قيد من كلام صاحب بقالة عراقية. أرجع JSON فقط:
-{"type":"sale|credit_sale|payment_in|expense|purchase","customer":"<اسم من القائمة أو null>","items":[{"sku":"<sku>","qty":<عدد>}],"amount":<رقم فقط إذا مذكور صراحة بالكلام وإلا null>,"channel":"cash|wallet|credit","category":"rent|gen|wage|other|null"}
-الزبائن: ${CUSTOMERS.map((c) => c.name).join('، ')}. المواد: ${PRODUCTS.map((p) => `${p.sku}=${p.name}`).join('، ')}.
+{"type":"sale|credit_sale|payment_in|expense|purchase","customer":"<رمز الزبون أو null>","items":[{"sku":"<sku>","qty":<عدد>}],"amount":<رقم فقط إذا مذكور صراحة بالكلام وإلا null>,"channel":"cash|wallet|credit","category":"rent|gen|wage|other|null"}
+الزبائن مخفية أسماؤهم برموز (${CUSTOMER_CODES.join('، ')})؛ حط الرمز بـ customer. المواد: ${PRODUCTS.map((p) => `${p.sku}=${p.name}`).join('، ')}.
 لا تخترع سعر: الأسعار تنحسب من قائمة المحل. إذا شي مو واضح خليه null.`;
 export async function parseEntry(text, { useLLM = true } = {}) {
   const off = parseEntryOffline(text);
   if (!(useLLM && llmStatus().ok)) return { ...off, source: 'offline' };
   try {
-    const { text: out } = await callLLM({ system: ENTRY, messages: [{ role: 'user', content: text }], json: true, maxTokens: 300 });
+    const { text: out } = await callLLM({ system: ENTRY, messages: [{ role: 'user', content: mask(text) }], json: true, maxTokens: 300 });
     const j = extractJSON(out);
     if (!j || !j.type) return { ...off, source: 'offline', fallback: 'bad_json' };
     const e = { raw: text, type: j.type, customer: null, items: [], amount: null, channel: j.channel || 'cash', missing: [], confidence: 0.9, category: j.category };
-    const c = CUSTOMERS.find((x) => x.name === j.customer); if (c) e.customer = c.id;
+    const c = CUSTOMERS.find((x) => x.id === j.customer) || CUSTOMERS.find((x) => x.name === j.customer); if (c) e.customer = c.id;
     for (const it of j.items || []) { const p = productBySku(it.sku); if (p && +it.qty > 0) e.items.push({ sku: p.sku, qty: +it.qty, price: p.sell }); }
     // an explicit amount is accepted only if that number is actually in the text
     if (j.amount && numbersIn(text).concat(off.amount ? [off.amount] : []).includes(Math.round(+j.amount))) e.amount = +j.amount;
@@ -342,8 +348,9 @@ export async function draftReminder(L, cid, { useLLM = true } = {}) {
   if (!(useLLM && llmStatus().ok)) return { text: tmpl, source: 'template' };
   try {
     const { text } = await callLLM({ system: `اكتب رسالة تذكير مؤدبة وقصيرة (سطرين) باللهجة العراقية من صاحب بقالة لزبون عنده دين. لازم تذكر المبلغ بالضبط ${fmt(b.balance)} دينار، وتگول إنه يگدر يسدد بضغطة من رابط الدفع بالمحفظة. بدون تهديد وبدون ضغط. توقيع: ${SHOP.owner}. أرجع JSON: {"text":"..."}`,
-      messages: [{ role: 'user', content: `الزبون: ${c.name}. أقدم دين: ${Math.max(...b.open.map((d) => d.age))} يوم.` }], json: true, maxTokens: 250 });
+      messages: [{ role: 'user', content: `الزبون: ${c.id} (${/^(أم|ام|ست)\s/.test(c.name) ? 'امرأة' : 'رجل'}، اسمه مخفي، اكتب الرمز ${c.id} مكان الاسم). أقدم دين: ${Math.max(...b.open.map((d) => d.age))} يوم.` }], json: true, maxTokens: 250 });
     const j = extractJSON(text);
+    if (j?.text) j.text = unmask(j.text);
     const bad = j?.text ? numbersIn(j.text).filter((n) => n !== b.balance && n > 31 && !b.open.some((d) => d.age === n)) : ['x'];
     if (j?.text && !bad.length && j.text.includes(fmt(b.balance))) return { text: j.text, source: 'gemini' };
     return { text: tmpl, source: 'template', rejected: 'رقم مو صحيح أو المبلغ ناقص' };
