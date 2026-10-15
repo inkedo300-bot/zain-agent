@@ -17,6 +17,7 @@ export function period(key, arg) {
     case 'this_week': return { from: satStart(T), to: T, label: 'هالأسبوع' };
     case 'last_week': { const s = addDays(satStart(T), -7); return { from: s, to: addDays(s, 6), label: 'الأسبوع الماضي' }; }
     case 'last7': return { from: addDays(T, -6), to: T, label: 'آخر 7 أيام' };
+    case 'prev7': return { from: addDays(T, -13), to: addDays(T, -7), label: 'الـ7 أيام اللي قبلها' };
     case 'this_month': return { from: T.slice(0, 8) + '01', to: T, label: 'هالشهر' };
     case 'last_month': { const d = new Date(T.slice(0, 8) + '01T12:00:00Z'); d.setUTCMonth(d.getUTCMonth() - 1); const f = d.toISOString().slice(0, 10); const e = addDays(T.slice(0, 8) + '01', -1); return { from: f, to: e, label: 'الشهر الماضي' }; }
     case 'last30': return { from: addDays(T, -29), to: T, label: 'آخر 30 يوم' };

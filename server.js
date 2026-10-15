@@ -44,6 +44,22 @@ const cache = new Map();
 const CACHE_MAX = 400, CACHE_MS = 60 * 60 * 1000;
 const cacheKey = (b) => (b.images?.length ? null : JSON.stringify([b.system, b.messages, b.json, b.tier, b.max_tokens]));
 
+// free-tier pacing: stay under each model's requests-per-minute instead of hitting 429s.
+// A call waits (up to 12 s) for a free slot; if none comes it moves on to the next model.
+const RPM = { [MODEL]: +process.env.GEMINI_RPM || 14, [MODEL_STRONG]: 4, [GROQ_MODEL]: +process.env.GROQ_RPM || 28 };
+const recent = {};
+async function slot(m) {
+  const lim = RPM[m] || 10, until = Date.now() + 12000;
+  for (;;) {
+    const now = Date.now();
+    recent[m] = (recent[m] || []).filter((t) => now - t < 60000);
+    if (recent[m].length < lim) { recent[m].push(now); return true; }
+    const wait = 60000 - (now - recent[m][0]) + 50;
+    if (now + wait > until) return false;
+    await new Promise((r) => setTimeout(r, Math.min(wait, 1500)));
+  }
+}
+
 // one entry point for every model call: picks the provider by task, falls back on errors
 async function llm(req, b) {
   const ck = b.nocache ? null : cacheKey(b);
@@ -60,6 +76,7 @@ async function llm(req, b) {
   if (!plan.length) { const e = new Error('no model key'); e.status = 503; throw e; }
   let last;
   for (const [prov, m] of plan) {
+    if (!(await slot(m))) { last = Object.assign(new Error('rate limit (paced)'), { retryable: true }); continue; }
     try {
       const out = prov === 'groq' ? await groqOnce(qKey, b, m) : await geminiOnce(gKey, b, m);
       count(prov + ':' + m);
@@ -100,6 +117,7 @@ async function geminiOnce(key, { system, messages, images = [], max_tokens = 800
   const generationConfig = { temperature: 0.2, maxOutputTokens: max_tokens };
   if (json) generationConfig.responseMimeType = 'application/json';
   if (/2\.5-flash/.test(m)) generationConfig.thinkingConfig = { thinkingBudget: 0 }; // faster answers for a live demo
+  else if (m === MODEL_STRONG && !/2\.5/.test(m)) generationConfig.thinkingConfig = { thinkingLevel: 'low' };
   const payload = JSON.stringify({ systemInstruction: system ? { parts: [{ text: system }] } : undefined, contents, generationConfig });
   let r, j;
   // busy model (503) or rate limit (429): retry twice with a short backoff

@@ -210,7 +210,7 @@ export function validateAnswer(text, res, r) {
   if (mf && mf.value && !['anomalies', 'topItems', 'inventory'].includes(r.tool) && !text.includes(fmt(Math.abs(mf.value)))) problems.push('ما ذكر الرقم الأساسي ' + fmt(Math.abs(mf.value)));
   return problems;
 }
-function compact(res) {
+export function compact(res) {
   const c = { ...res };
   c.figures = res.figures?.map(({ key, label, value }) => ({ key, label, value }));
   if (res.series) { c.series = undefined; c.lowest = { date: res.lowestDate, balance: res.lowest.balance }; }

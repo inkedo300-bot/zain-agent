@@ -8,6 +8,7 @@ import { autoCheck, incomingOf, makeOrder, orderValue, STATUS_AR, OPEN, describe
 import { startRecording } from './voice.js';
 import { FLOWS, LANES, flowSVG } from './flow.js';
 import { transcribe } from './agent.js';
+import { agentAsk, isOpenQuestion, MAX_STEPS } from './agentloop.js';
 
 // ── helpers ──
 const $ = (s) => document.querySelector(s);
@@ -522,6 +523,14 @@ function panelTrace() {
   return S.runs.map((r) => `<div class="run"><div class="rh"><b>«${esc(r.q)}»</b><span class="src">${r.ms} ms</span></div>
     ${r.trace.map((t) => {
       if (t.step === 'فهم السؤال') return `<div class="step"><span class="k">١. فهم السؤال</span><div>${srcTag(t.source)} ${t.ms ? `<span class="muted">${t.ms} ms</span>` : ''}${t.fallback ? ` <span class="tag unconf">رجعنا للمحلل الثابت: ${esc(t.fallback)}</span>` : ''}<pre>${esc(JSON.stringify(t.detail))}</pre></div></div>`;
+      if (t.step === 'وكيل') {
+        if (t.kind === 'start') return `<div class="step"><span class="k">وكيل</span><div><span class="tag info">سؤال مفتوح</span> ${esc(t.note)} · حد أقصى ${MAX_STEPS} خطوات</div></div>`;
+        if (t.kind === 'tool') return `<div class="step"><span class="k">أداة</span><div>${srcTag(t.source === 'gemini' ? 'gemini' : 'offline')} ${t.thought ? `<span class="muted">«${esc(t.thought)}»</span><br>` : ''}<code>${esc(t.tool)}(${esc(JSON.stringify(t.args || {}))})</code><table class="tbl" style="margin-top:6px">${(t.figures || []).slice(0, 6).map((f) => `<tr><td>${esc(f.label)}</td><td class="num">${fmt(f.value)}</td></tr>`).join('')}</table></div></div>`;
+        if (t.kind === 'blocked') return `<div class="step"><span class="k">انمنع</span><div><span class="tag late">${esc(t.tool)}</span> ${esc(t.note)}</div></div>`;
+        if (t.kind === 'final') return `<div class="step"><span class="k">الجواب</span><div>${t.source === 'gemini' ? (t.accepted ? '<span class="tag ok">كل رقم رجعته أداة</span>' : `<span class="tag late">انرفض: ${esc((t.problems || [])[0] || '')}</span>`) : `<span class="tag unconf">${esc(t.note || 'سير عمل ثابت')}</span>`}</div></div>`;
+        if (t.kind === 'error') return `<div class="step"><span class="k">خطأ</span><div>${esc(t.note)}</div></div>`;
+        return '';
+      }
       if (t.step === 'الخصوصية') return `<div class="step"><span class="k">الخصوصية</span><div><span class="tag ok">الأسماء مخفية</span> اللي وصل للنموذج: <code>${esc(t.sent)}</code></div></div>`;
       if (t.step === 'الأداة') return `<div class="step"><span class="k">٢. الحساب</span><div><code>${t.tool}(${esc(JSON.stringify(t.args || {}))})</code><table class="tbl" style="margin-top:6px">${t.figures.map((f) => `<tr><td>${esc(f.label)}</td><td class="n">${fmt(f.value)}</td><td class="muted" style="font-size:11px">${f.n} قيد</td></tr>`).join('')}</table></div></div>`;
       if (t.step === 'صياغة الجواب') return `<div class="step"><span class="k">٣. الصياغة</span><div>${srcTag(t.source)} ${t.error ? `<span class="tag late">${esc(t.error)}</span>` : t.accepted ? '<span class="tag ok">اجتاز التحقق</span>' : `<span class="tag late">انرفض</span> ${t.problems.map(esc).join('، ')}`}${t.draft ? `<pre style="direction:rtl;text-align:right;font-family:var(--font)">${esc(t.draft)}</pre>` : ''}</div></div>`;
@@ -677,6 +686,16 @@ async function sendChat(text, opts = {}) {
   } else {
     const parts = splitQuestions(text);
     for (const q of parts) {
+    if (isOpenQuestion(q) && !detectAction(q)) {
+      // open question → the agent (read-only tools, up to MAX_STEPS), proposals become buttons
+      const r = await agentAsk(L, q, { useLLM: useLLM() });
+      A.typing = parts.length > 1 && q !== parts.at(-1);
+      const src = r.answerSource === 'agent' ? `وكيل Gemini · ${r.stepsUsed} أدوات` : `سير عمل ثابت · ${r.stepsUsed} أدوات`;
+      const props = (r.proposals || []).map((p) => p.type === 'remind' ? `<button data-a="remCust" data-n="${esc(p.name)}">ذكّر ${esc(p.name)}</button>` : `<button data-a="propOrd" data-id="${p.supplier}">اطلب من ${esc(p.name)}</button>`).join('');
+      A.chat.push({ from: 'bot', text: (parts.length > 1 ? `«${q.replace(/؟$/, '')}»: ` : '') + r.answer, figs: r.res?.figures, meta: `<span>${src}</span><button data-a="showTrace">شنو سوّى الوكيل؟</button>${props}` });
+      S.runs.unshift(r);
+      continue;
+    }
     const r = await ask(L, q, { useLLM: useLLM() });
     if (r.action) { A.typing = false; await startAction(r.action, r.routeSource); S.runs.unshift(r); continue; }
     A.typing = parts.length > 1 && q !== parts.at(-1);
@@ -805,6 +824,7 @@ document.addEventListener('click', async (ev) => {
         else { const o = makeOrder(act.sid, act.items); S.orders.push(o); sentOrder(o, 'بطلب منك بالمساعد'); }
         act.status = 'sent'; renderA(); break;
       }
+      case 'propOrd': await startAction({ tool: 'order', args: { supplier: a.dataset.id } }, 'button'); break;
       case 'remCust': await startAction({ tool: 'remind', args: { name: a.dataset.n } }, 'button'); break;
       case 'actCancel': { const m = A.chat[+a.dataset.i]; m.act.status = 'cancelled'; renderA(); break; }
     }

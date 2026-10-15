@@ -1,7 +1,9 @@
 // node eval/run_eval.mjs  → offline evaluation (no API key needed)
 import { generate } from '../public/js/data.js';
 import { Ledger } from '../public/js/ledger.js';
-import { evalOffline, evalShops } from '../public/js/eval.js';
+import { evalOffline, evalShops, evalAgent } from '../public/js/eval.js';
+import { agentAsk } from '../public/js/agentloop.js';
+globalThis.localStorage ??= { getItem: () => '', setItem() {}, removeItem() {} };
 import { writeFileSync } from 'node:fs';
 const L = new Ledger(generate());
 const o = evalOffline(L);
@@ -20,4 +22,7 @@ o.entries.rows.filter((r) => !r.ok).forEach((r) => console.log('   ✗', r.t, JS
 console.log(`Anomalies over ${s.seeds} shops: precision ${Math.round(s.anomalies.precision * 100)}% recall ${Math.round(s.anomalies.recall * 100)}% (tp ${s.anomalies.tp} fp ${s.anomalies.fp} fn ${s.anomalies.fn})`);
 console.log('   per kind', JSON.stringify(s.anomalies.perKind));
 console.log(`Forecast backtest: MAE model ${s.backtest.maeModel} vs naive ${s.backtest.maeNaive} (${s.backtest.improvement}% better, beat naive in ${s.backtest.beatNaive}/${s.seeds})`);
-writeFileSync(new URL('./results.json', import.meta.url), JSON.stringify({ offline: { qa: [o.qa.ok, o.qa.n], held: [o.held.ok, o.held.n], para: [o.para.ok, o.para.n], refuse: [o.refuse.ok, o.refuse.n], entries: [o.entries.ok, o.entries.n] }, shops: s }, null, 2));
+const ag = await evalAgent(L, { useLLM: false, agentAsk });
+console.log('Agent questions (fixed "why" workflow, no model):', pct(ag.ok, ag.n));
+ag.rows.filter((r) => !r.ok).forEach((r) => console.log('   ✗', r.q, r.okTools ? '' : 'tools ' + r.tools.join(','), r.okNums ? '' : 'numbers'));
+writeFileSync(new URL('./results.json', import.meta.url), JSON.stringify({ offline: { qa: [o.qa.ok, o.qa.n], held: [o.held.ok, o.held.n], para: [o.para.ok, o.para.n], refuse: [o.refuse.ok, o.refuse.n], entries: [o.entries.ok, o.entries.n], agent: [ag.ok, ag.n] }, shops: s }, null, 2));

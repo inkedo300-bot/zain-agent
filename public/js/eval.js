@@ -8,6 +8,7 @@
 //  4. Entry parsing from free text
 //  5. Anomalies: precision / recall over 20 generated shops
 //  6. Forecast backtest vs a naive baseline over 20 shops
+//  7. The agent on open questions (right tools + every key number)
 // Runs in the browser and in Node (eval/run_eval.mjs).
 // ─────────────────────────────────────────────────────────────
 import { generate, PLANTED, CUSTOMERS, fmt, walletEffect, OPENING_STOCK } from './data.js';
@@ -183,4 +184,34 @@ export function evalShops(seeds = 20) {
   return { seeds, anomalies: { tp, fp, fn, precision: tp / (tp + fp), recall: tp / (tp + fn), perKind },
     backtest: { maeModel: mae('maeModel'), maeNaive: mae('maeNaive'), improvement: Math.round((1 - mae('maeModel') / mae('maeNaive')) * 1000) / 10,
       beatNaive: bt.filter((b) => b.maeModel < b.maeNaive).length } };
+}
+
+// ── 7. the agent (open questions): did it read the right tools, and is every key number right? ──
+// Truth is computed here from raw transactions; the agent passes a question when its answer
+// contains ALL the listed numbers and it called at least the required tools.
+export function agentSet(L) {
+  const tx = L.tx;
+  const n7 = T.net(tx, 'last7'), p7 = T.net(tx, 'prev7');
+  const s7 = T.sales(tx, 'last7'), sp7 = T.sales(tx, 'prev7');
+  return [
+    { q: 'ليش ربحي نزل؟', need: ['compare'], nums: [n7, p7] },
+    { q: 'ليش صافي ربحي تغيّر عن الأسبوع اللي قبل؟', need: ['compare'], nums: [n7, p7] },
+    { q: 'ليش البيع قل هالأسبوع؟', need: ['compare'], nums: [s7, sp7] },
+    { q: 'شلون أدبر الإيجار ودفعة المورد الشهر الجاي؟', need: ['forecast', 'debts'], nums: [T.debts(tx)] },
+    { q: 'شنو تنصحني أسوي حتى تكفيني الفلوس؟', need: ['forecast', 'debts'], nums: [T.debts(tx)] },
+  ];
+}
+const usedTools = (r) => r.trace.filter((t) => t.step === 'وكيل' && t.kind === 'tool').map((t) => t.tool);
+export async function evalAgent(L, { useLLM = false, pauseMs = 0, agentAsk } = {}) {
+  const rows = [];
+  for (const c of agentSet(L)) {
+    const r = await agentAsk(L, c.q, { useLLM });
+    const tools = usedTools(r);
+    const nums = new Set((r.answer.match(/\d[\d,]*/g) || []).map((x) => +x.replace(/,/g, '')));
+    const okNums = c.nums.every((n) => nums.has(Math.abs(Math.round(n))));
+    const okTools = c.need.every((t) => tools.includes(t));
+    rows.push({ q: c.q, ok: okNums && okTools, okNums, okTools, tools, source: r.answerSource, steps: r.stepsUsed, answer: r.answer, ms: r.ms });
+    if (pauseMs) await new Promise((res) => setTimeout(res, pauseMs));
+  }
+  return { n: rows.length, ok: rows.filter((r) => r.ok).length, byAgent: rows.filter((r) => r.source === 'agent').length, rows };
 }
