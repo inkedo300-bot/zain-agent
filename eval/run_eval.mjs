@@ -13,6 +13,8 @@ console.log('Questions (exact number):', pct(o.qa.ok, o.qa.n));
 o.qa.rows.filter((r) => !r.ok).forEach((r) => console.log('   ✗', r.q, '→', r.gotTool, r.got, 'truth', r.truth));
 console.log('HELD-OUT questions (not used for tuning):', pct(o.held.ok, o.held.n));
 o.held.rows.filter((r) => !r.ok).forEach((r) => console.log('   ✗', r.q, '→', r.gotTool, r.got, 'truth', r.truth));
+console.log('Mixed Arabic + English (held-out):', pct(o.mixed.ok, o.mixed.n));
+o.mixed.rows.filter((r) => !r.ok).forEach((r) => console.log('   ✗', r.q, '→', r.gotTool, r.got, 'truth', r.truth));
 console.log('Paraphrases:', pct(o.para.ok, o.para.n), '· consistent groups', o.para.consistentGroups + '/' + o.para.groups.length);
 o.para.groups.filter((g) => g.fails.length).forEach((g) => console.log('   ✗', g.group, g.fails.join(' | ')));
 console.log('Refusals:', pct(o.refuse.ok, o.refuse.n));
@@ -25,4 +27,4 @@ console.log(`Forecast backtest: MAE model ${s.backtest.maeModel} vs naive ${s.ba
 const ag = await evalAgent(L, { useLLM: false, agentAsk });
 console.log('Agent questions (fixed "why" workflow, no model):', pct(ag.ok, ag.n));
 ag.rows.filter((r) => !r.ok).forEach((r) => console.log('   ✗', r.q, r.okTools ? '' : 'tools ' + r.tools.join(','), r.okNums ? '' : 'numbers'));
-writeFileSync(new URL('./results.json', import.meta.url), JSON.stringify({ offline: { qa: [o.qa.ok, o.qa.n], held: [o.held.ok, o.held.n], para: [o.para.ok, o.para.n], refuse: [o.refuse.ok, o.refuse.n], entries: [o.entries.ok, o.entries.n], agent: [ag.ok, ag.n] }, shops: s }, null, 2));
+writeFileSync(new URL('./results.json', import.meta.url), JSON.stringify({ offline: { qa: [o.qa.ok, o.qa.n], held: [o.held.ok, o.held.n], mixed: [o.mixed.ok, o.mixed.n], para: [o.para.ok, o.para.n], refuse: [o.refuse.ok, o.refuse.n], entries: [o.entries.ok, o.entries.n], agent: [ag.ok, ag.n] }, shops: s }, null, 2));
