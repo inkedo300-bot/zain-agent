@@ -23,7 +23,7 @@ const P = {
   chart: '<path d="M4 19h16"/><path d="M5 15l4-5 4 3 6-7"/>', bell: '<path d="M6 16V11a6 6 0 0112 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 004 0"/>',
   moon: '<path d="M20 14.5A8 8 0 019.5 4a8 8 0 1010.5 10.5z"/>', alert: '<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17v.01"/>', dollar: '<path d="M12 3v18"/><path d="M16 7.5c0-1.9-1.8-3-4-3s-4 1.1-4 3 1.8 2.6 4 3.1 4 1.3 4 3.3-1.8 3.1-4 3.1-4-1.2-4-3"/>',
   truck: '<path d="M3 6h11v10H3z"/><path d="M14 10h4l3 3v3h-7"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/>', camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
-  week: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/>', mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0012 0M12 17v4"/>',
+  week: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/>', mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0012 0M12 17v4"/>', lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/>',
   send: '<path d="M20 12H6M12 6l-6 6 6 6"/>', back: '<path d="M9 5l7 7-7 7"/>', plus: '<path d="M12 5v14M5 12h14"/>', check: '<path d="M5 12l5 5 9-10"/>', x: '<path d="M6 6l12 12M18 6L6 18"/>',
   in: '<path d="M12 4v13M6 11l6 6 6-6"/>', out: '<path d="M12 20V7M6 13l6-6 6 6"/>', link: '<path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/>',
   info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8v.01"/>', copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 00-1-1H5a1 1 0 00-1 1v10a1 1 0 001 1h3"/>',
@@ -46,13 +46,21 @@ function init() {
     orders: [], supSet: { S1: { auto: true, cap: 2000000 }, S2: { auto: false, cap: 1000000 }, S3: { auto: false, cap: 1000000 } },
     supBal: { S1: 8450000, S2: 3200000, S3: 4125000 },
     notes: [], bal: Object.fromEntries(CUSTOMERS.map((c, i) => [c.id, 250000 + i * 37500])),
-    runs: [], events: [], tab: 'flow', flow: { key: 'debt', sel: -1, live: { debt: -1, ask: -1, order: -1 }, note: {}, fresh: false, zoom: false }, evalOff: null, evalShops: null, evalLLM: null, evalBusy: false, evalProg: 0,
+    runs: [], events: [], audit: [], remLog: {}, tab: 'flow', flow: { key: 'debt', sel: -1, live: { debt: -1, ask: -1, agent: -1, order: -1 }, note: {}, fresh: false, zoom: false }, evalOff: null, evalShops: null, evalLLM: null, evalBusy: false, evalProg: 0,
   };
   // pending debt confirmations from the last two weeks
   for (const t of L.tx.filter((t) => t.type === 'credit_sale' && !t.confirmed && daysBetween(t.date, TODAY) <= 14))
     S.notes.push({ id: 'N' + t.id, cid: t.customer, kind: 'confirm', debtId: t.id, amount: t.amount, status: 'new', time: dateAr(t.date), text: describeItems(t) });
 }
 const describeItems = (t) => (t.items || []).map((i) => `${i.qty} ${productBySku(i.sku).name}`).join(' + ');
+// ── audit log: every write, who did it, and a 5-minute undo where undo makes sense ──
+const UNDO_MS = 5 * 60 * 1000;
+const PIN = '1234'; // demo PIN for money that leaves the shop
+function audit(o) { S.audit.unshift({ id: 'A' + (S.audit.length + 1), at: Date.now(), time: hhmm(), status: 'done', ...o }); if (S.tab === 'audit') renderPanel(); }
+function undoAudit(id) {
+  const a = S.audit.find((x) => x.id === id); if (!a || a.status !== 'done' || !a.undo || Date.now() - a.at > UNDO_MS) return false;
+  a.undo(); a.status = 'undone'; event(`تراجع: ${a.action} (${a.detail}).`); return true;
+}
 function event(text, kind = 'info') { S.events.unshift({ time: hhmm(), text, kind }); fetch('/api/log', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind, text }) }).catch(() => {}); if (S.tab === 'events') renderPanel(); }
 
 // ── top bar ──
@@ -142,6 +150,7 @@ function chatScreen() {
   return `${appbar('المساعد', 'اسأل أو سجّل باللهجة، بالكتابة أو بالصوت', false)}
   <div class="chat" id="chatBox">${msgs || `<div class="msg bot">هلا ${SHOP.owner}. اسألني عن البيع، الربح، الديون، أو السيولة. وتگدر تسجل: «بعت 3 كراتين ببسي لأبو حسين بالدين».<div class="meta"><span>الأرقام اللي تحتها خط تنضغط وتبين العمليات اللي انحسبت منها.</span></div></div>`}${S.A.typing ? '<div class="typing"><i></i><i></i><i></i></div>' : ''}</div>
   <div class="composer"><div class="sugs">${SUGGESTIONS.map((s) => `<button data-a="ask" data-q="${esc(s)}">${esc(s)}</button>`).join('')}<button data-a="ask" data-q="بعت 3 كراتين ببسي لأبو حسين بالدين">بعت 3 كراتين ببسي لأبو حسين بالدين</button></div>
+    ${S.A.heard ? `<div class="heard">${icon('mic', 16)}<span>سمعتك: «<b>${esc(S.A.heard.text)}</b>». صح؟</span><button class="btn sm primary" data-a="heardOk">صح، أرسل</button><button class="btn sm" data-a="heardEdit">أصحّح</button></div>` : ''}
     <div class="line"><button class="cbtn ${S.A.recording ? 'rec' : ''}" data-a="mic" title="${S.A.recording ? 'اضغط حتى توقف' : 'تكلم'}" ${S.A.transcribing ? 'disabled' : ''}>${S.A.transcribing ? '<span class="spin"></span>' : icon('mic', 18)}</button><button class="cbtn" data-a="sub" data-k="notebook" title="صورة دفتر">${icon('camera', 18)}</button>
     <input id="chatIn" placeholder="اكتب سؤالك أو القيد…" value="${esc(S.A.draft)}" autocomplete="off"><button class="cbtn send" data-a="send">${icon('send', 18)}</button></div></div>`;
 }
@@ -398,6 +407,14 @@ function toastB(text, sub, o = {}) { S.B.toast = { text, sub, ...o }; renderB();
 
 // ── sheets (in phone A) ──
 function sheetHTML(sh) {
+  if (sh.kind === 'pin') {
+    const o = S.orders.find((x) => x.id === sh.order);
+    return `<div class="sheet-bg" data-a="closeSheet"><div class="sheet"><div class="grab"></div><div class="sh"><b>${icon('lock', 16)} تأكيد الدفع</b><button class="btn sm" data-a="closeSheet">إلغاء</button></div>
+      <div class="sb"><p>ادفع <b class="num">${fmt(orderValue(o, L))} د.ع</b> لـ${esc(SUPPLIERS[o.sid].short)} ${sh.ch === 'wallet' ? 'من المحفظة' : 'كاش'}.</p>
+      <div class="pnote">أي فلوس تطلع من المحل تحتاج رمزك، حتى لو الوكيل هو اللي جهّز العملية.</div>
+      <input id="pinIn" type="password" inputmode="numeric" maxlength="4" placeholder="••••" style="width:100%;text-align:center;letter-spacing:12px;font-size:24px;border:1.5px solid var(--line-2);border-radius:12px;padding:10px;margin:10px 0">
+      <button class="main" data-a="pinOk">ادفع</button><div class="pnote" style="text-align:center">للتجربة: 1234</div></div></div></div>`;
+  }
   if (sh.kind === 'fig') {
     const f = sh.fig; const txs = f.ids.map((id) => L.byId(id)).filter(Boolean);
     const total = txs.reduce((a, t) => a + t.amount, 0);
@@ -477,12 +494,12 @@ function renderCustSel() { $('#custSel').innerHTML = `<optgroup label="الزب�
   <optgroup label="الموردين">${Object.values(SUPPLIERS).map((sp) => { const n = S.orders.filter((o) => o.sid === sp.id && o.status === 'sent').length; return `<option value="s:${sp.id}" ${S.B.mode === 'sup' && S.B.sid === sp.id ? 'selected' : ''}>${sp.short}${n ? ` (${n})` : ''}</option>`; }).join('')}</optgroup>`; }
 
 // ═════════════ PANEL ═════════════
-const TABS = [['flow', 'مخطط العمل'], ['trace', 'خطوات الوكيل'], ['events', 'أحداث المحفظة'], ['eval', 'التقييم'], ['data', 'البيانات'], ['how', 'شلون يشتغل']];
+const TABS = [['flow', 'مخطط العمل'], ['trace', 'خطوات الوكيل'], ['audit', 'سجل التدقيق'], ['events', 'أحداث المحفظة'], ['eval', 'التقييم'], ['data', 'البيانات'], ['how', 'شلون يشتغل']];
 function renderPanel() {
-  $('#tabs').innerHTML = TABS.map(([k, l]) => `<button class="${S.tab === k ? 'on' : ''}" data-p="tab" data-k="${k}">${l}${k === 'flow' && S.flow.fresh && S.tab !== 'flow' ? '<span class="cnt live">جديد</span>' : ''}${k === 'trace' && S.runs.length ? `<span class="cnt">${S.runs.length}</span>` : ''}${k === 'events' && S.events.length ? `<span class="cnt">${S.events.length}</span>` : ''}</button>`).join('');
+  $('#tabs').innerHTML = TABS.map(([k, l]) => `<button class="${S.tab === k ? 'on' : ''}" data-p="tab" data-k="${k}">${l}${k === 'flow' && S.flow.fresh && S.tab !== 'flow' ? '<span class="cnt live">جديد</span>' : ''}${k === 'audit' && S.audit.length ? `<span class="cnt">${S.audit.length}</span>` : ''}${k === 'trace' && S.runs.length ? `<span class="cnt">${S.runs.length}</span>` : ''}${k === 'events' && S.events.length ? `<span class="cnt">${S.events.length}</span>` : ''}</button>`).join('');
   if (S.tab !== 'flow') flowStop(); else S.flow.fresh = false;
   if (S.flow.zoom) { const z = document.querySelector('#flowZoomBody'); if (z) z.innerHTML = flowInner(true); else S.flow.zoom = false; }
-  $('#panelBody').innerHTML = { flow: panelFlow, trace: panelTrace, events: panelEvents, eval: panelEval, data: panelData, how: panelHow }[S.tab]();
+  $('#panelBody').innerHTML = { flow: panelFlow, audit: panelAudit, trace: panelTrace, events: panelEvents, eval: panelEval, data: panelData, how: panelHow }[S.tab]();
 }
 // ── workflow diagram ──
 function flowMark(key, id, note) {
@@ -538,6 +555,12 @@ function panelTrace() {
       if (t.step === 'قيد') return `<div class="step"><span class="k">قيد جديد</span><div>${srcTag(t.source)}${t.fallback ? ` <span class="tag unconf">${esc(t.fallback)}</span>` : ''}<pre>${esc(JSON.stringify(t.entry))}</pre></div></div>`;
       return '';
     }).join('')}</div>`).join('');
+}
+function panelAudit() {
+  const tiers = `<div class="tiers"><div><b>قراءة</b><span>أسئلة وتحليل: حرّة، والوكيل يقرا بس</span></div><div><b>تسجيل وإرسال</b><span>قيد أو تذكير أو طلبية: بطاقة تأكيد من التاجر</span></div><div><b>حركة فلوس</b><span>دفع لمورد: رمز PIN دائماً</span></div><div><b>تلقائي</b><span>طلبية مورد بس، وتحت حد يحدده التاجر</span></div></div>`;
+  if (!S.audit.length) return `${tiers}<div class="empty">كل عملية تكتب بالدفتر أو تطلع للزبون أو المورد تنسجل هنا: منو سواها، وبأي نموذج، وبأي مستوى صلاحية. وتگدر تتراجع عنها خلال 5 دقايق.</div>`;
+  const now = Date.now();
+  return `${tiers}<table class="tbl audit"><tr><th>الوقت</th><th>العملية</th><th>منو</th><th>الصلاحية</th><th></th></tr>${S.audit.map((a) => `<tr class="${a.status}"><td class="num">${a.time}</td><td><b>${esc(a.action)}</b><br><small>${esc(a.detail)}</small>${a.model && a.model !== '—' ? `<br><small class="muted">${esc(a.model)}</small>` : ''}</td><td><small>${esc(a.by)}</small></td><td><small>${esc(a.tier || '')}</small></td><td>${a.status === 'undone' ? '<span class="tag late">تراجعت</span>' : a.undo && now - a.at < UNDO_MS ? `<button class="btn sm" data-p="undo" data-id="${a.id}">تراجع</button>` : ''}</td></tr>`).join('')}</table>`;
 }
 function panelEvents() {
   if (!S.events.length) return `<div class="empty">هنا تظهر الأحداث بين المحل والزبون: تأكيد دين، اعتراض، تذكير، تسديد برابط دفع، ومطابقة تلقائية.</div>`;
@@ -598,6 +621,7 @@ function panelHow() {
 
 // ═════════════ supplier orders ═════════════
 function sentOrder(o, how) {
+  audit({ action: 'طلبية للمورد', detail: `${SUPPLIERS[o.sid].short} · ${describeOrder(o)}`, by: o.auto ? 'تلقائي (تحت الحد اللي حدده التاجر)' : 'التاجر', model: 'حساب بالكود (سرعة البيع)', tier: o.auto ? 'تلقائي ضمن حد' : 'إرسال · موافقة' });
   event(`انرسلت طلبية ${o.id} لـ${SUPPLIERS[o.sid].short} ${how}: ${describeOrder(o)}.`);
   toastA(o.auto ? 'انرسلت طلبية تلقائية' : 'انرسلت الطلبية', `${SUPPLIERS[o.sid].short} · ${describeOrder(o)}`, { icon: 'truck' });
   // the order lands on the supplier's phone: show that phone with the notification
@@ -622,9 +646,17 @@ function runAuto() {
 
 // ═════════════ actions ═════════════
 // the reminder lands on the customer's phone: show that phone with the notification
+// responsibility: one reminder per customer per 7 days, so a customer is never pestered
+const REMIND_EVERY_DAYS = 7;
+const remindBlocked = (cid) => S.remLog[cid] && daysBetween(S.remLog[cid], TODAY) < REMIND_EVERY_DAYS;
 function sendReminderTo(cid, text) {
+  if (remindBlocked(cid)) { toastA('انرسل تذكير قريب', `التذكير الجاي لـ${customerById(cid).name} بعد ${dateAr(addDays(S.remLog[cid], REMIND_EVERY_DAYS))}`); return false; }
   const bal = L.debtBook()[cid].balance;
-  S.notes.push({ id: 'R' + Date.now(), cid, kind: 'reminder', amount: bal, status: 'new', time: 'هسه', text });
+  const nid = 'R' + Date.now();
+  S.notes.push({ id: nid, cid, kind: 'reminder', amount: bal, status: 'new', time: 'هسه', text });
+  S.remLog[cid] = TODAY;
+  audit({ action: 'تذكير برابط دفع', detail: `${customerById(cid).name} · ${fmt(bal)} د.ع`, by: 'التاجر (وافق على البطاقة)', model: 'Gemini كتب الرسالة، المدقق تأكد من المبلغ', tier: 'إرسال · بطاقة تأكيد',
+    undo: () => { const n = S.notes.find((x) => x.id === nid); if (n && n.status === 'new') { S.notes = S.notes.filter((x) => x.id !== nid); delete S.remLog[cid]; renderB(); renderCustSel(); } } });
   event(`انرسل تذكير برابط دفع لـ${customerById(cid).name} (${fmt(bal)}).`);
   toastA('انرسل التذكير', `${customerById(cid).name} · ومعه زر دفع بالمحفظة`, { ok: true, icon: 'check' });
   S.B.mode = 'cust'; S.B.cid = cid; S.B.sheet = null; S.B.edit = null; S.B.deliver = null;
@@ -641,6 +673,7 @@ async function startAction(act, source) {
       const top = L.debts().rows.filter((r) => r.balance > 0).slice(0, 4);
       A.chat.push({ from: 'bot', act: { kind: 'pickCust', options: top.map((r) => ({ id: r.cid || r.id, name: r.name, bal: r.balance })) }, text: 'منو تريد أذكّر؟ هذولي أكثر الناس المطلوبين إلك:' }); renderA(); return;
     }
+    if (remindBlocked(c.id)) { A.chat.push({ from: 'bot', text: `ذكّرت ${c.name} قبل فترة قصيرة. حتى ما تنزعج، التذكير الجاي يصير بعد ${dateAr(addDays(S.remLog[c.id], REMIND_EVERY_DAYS))}.`, meta: '<span>حد التذكير: مرة بالأسبوع</span>' }); renderA(); return; }
     const bal = L.debtBook()[c.id].balance;
     if (bal <= 0) { A.chat.push({ from: 'bot', text: `${c.name} ما عليه دين هسه، فما أكو داعي للتذكير.`, meta: via ? `<span>${via}</span>` : '' }); renderA(); return; }
     const m = { from: 'bot', act: { kind: 'remind', cid: c.id, name: c.name, bal, status: 'busy' }, meta: via };
@@ -694,6 +727,7 @@ async function sendChat(text, opts = {}) {
       const props = (r.proposals || []).map((p) => p.type === 'remind' ? `<button data-a="remCust" data-n="${esc(p.name)}">ذكّر ${esc(p.name)}</button>` : `<button data-a="propOrd" data-id="${p.supplier}">اطلب من ${esc(p.name)}</button>`).join('');
       A.chat.push({ from: 'bot', text: (parts.length > 1 ? `«${q.replace(/؟$/, '')}»: ` : '') + r.answer, figs: r.res?.figures, meta: `<span>${src}</span><button data-a="showTrace">شنو سوّى الوكيل؟</button>${props}` });
       S.runs.unshift(r);
+      flowMark('agent', 'g7', `«${q}» ${r.answerSource === 'agent' ? `جاوبه الوكيل بـ${r.stepsUsed} أدوات` : 'جاوبه سير العمل الثابت'}`);
       continue;
     }
     const r = await ask(L, q, { useLLM: useLLM() });
@@ -731,6 +765,8 @@ function saveEntry(e) {
     flowMark('debt', 'd5', `دين ${fmt(t.amount)} على ${customerById(t.customer).name}، ووصله طلب تأكيد`);
     if (S.B.cid === t.customer) toastB('طلب تأكيد دين جديد', `${SHOP.name} · ${fmt(t.amount)} د.ع`); else renderCustSel();
   } else if (t) event(`قيد ${TYPE_AR[t.type]} ${fmt(t.amount)}.`);
+  if (t) audit({ action: TYPE_AR[t.type], detail: `${t.customer ? customerById(t.customer).name + ' · ' : ''}${fmt(t.amount)} د.ع`, by: e.by || 'التاجر', model: e.source === 'gemini' ? 'Gemini (فهم الجملة)' : e.source === 'offline' ? 'المحلل الثابت' : '—', tier: 'تسجيل · بطاقة تأكيد',
+    undo: () => { L.remove(t.id); S.notes = S.notes.filter((n) => n.debtId !== t.id); renderA(); renderB(); renderCustSel(); } });
   if (t && (t.type === 'sale' || t.type === 'credit_sale')) runAuto();
   return t;
 }
@@ -755,7 +791,7 @@ document.addEventListener('click', async (ev) => {
       case 'closeSheet': if (ev.target === a || a.tagName === 'BUTTON') { A.sheet = null; renderA(); } break;
       case 'filter': A.filter = a.dataset.k; renderA(); break;
       case 'ask': A.tab = 'chat'; A.sub = null; sendChat(a.dataset.q); break;
-      case 'send': sendChat(document.getElementById('chatIn')?.value); break;
+      case 'send': { const v = document.getElementById('chatIn')?.value; const wasHeard = !!A.heard; A.heard = null; sendChat(v, { voice: wasHeard }); break; }
       case 'showTrace': S.tab = 'trace'; renderPanel(); document.querySelector('.panelcol')?.scrollIntoView({ behavior: 'smooth' }); break;
       case 'saveEntry': { const i = +a.dataset.i; const e = entryFromCard(i); e.missing = []; if (!validEntry(e)) { toastA('القيد ناقص', 'كمّل النوع والزبون والمبلغ'); break; } saveEntry(e); S.A.chat[i].saved = true; renderA(); break; }
       case 'cancelEntry': S.A.chat[+a.dataset.i].cancelled = true; renderA(); break;
@@ -790,21 +826,26 @@ document.addEventListener('click', async (ev) => {
       case 'manualOrder': { const sid = a.dataset.id; const r = L.reorder({ incoming: incomingOf(S.orders) }); const items = r.bySup[sid].filter((i) => i.order > 0).map((i) => ({ sku: i.sku, qty: i.order })); const o = makeOrder(sid, items); S.orders.push(o); sentOrder(o, 'بعد موافقتك'); renderA(); break; }
       case 'sendDraft': { const o = S.orders.find((x) => x.id === a.dataset.id); o.status = 'sent'; sentOrder(o, 'بعد موافقتك'); renderA(); break; }
       case 'cancelOrder': { const o = S.orders.find((x) => x.id === a.dataset.id); o.status = 'cancelled'; event(`لغيت طلبية ${o.id}.`); renderA(); break; }
-      case 'payInv': {
-        const o = S.orders.find((x) => x.id === a.dataset.id); const ch = a.dataset.ch; const amount = orderValue(o, L);
+      case 'payInv': { A.sheet = { kind: 'pin', order: a.dataset.id, ch: a.dataset.ch }; renderA(); setTimeout(() => $('#pinIn')?.focus(), 30); break; }
+      case 'pinOk': {
+        const sh = A.sheet; if ($('#pinIn').value !== PIN) { toastA('الرمز غلط', 'للتجربة: 1234'); break; }
+        A.sheet = null;
+        const o = S.orders.find((x) => x.id === sh.order); const ch = sh.ch; const amount = orderValue(o, L);
         const t = L.add({ type: 'purchase', channel: ch, supplier: o.sid, fx: L.rateOn(TODAY), amount, items: o.items.map((i) => ({ sku: i.sku, qty: i.accepted ?? i.qty, cost: i.price ?? L.currentCost(i.sku) })), note: `بضاعة من ${SUPPLIERS[o.sid].short} (طلبية ${o.id})` });
         o.status = 'paid'; o.txId = t.id; if (ch === 'wallet') S.supBal[o.sid] += amount;
         flowMark('order', 'o12', `دفعت فاتورة ${o.id} والمخزون زاد`);
         event(`دفعت فاتورة ${o.id} لـ${SUPPLIERS[o.sid].short} ${fmt(amount)} ${ch === 'wallet' ? 'بالمحفظة' : 'كاش'}، والمخزون زاد.`);
         toastA('انحفظت البضاعة بالدفتر', `المخزون زاد · ${fmt(amount)} د.ع`, { ok: true, icon: 'box' });
-        if (S.B.mode === 'sup' && S.B.sid === o.sid) toastB(`وصلت دفعة من ${SHOP.name}`, `${fmt(amount)} د.ع`, { ok: true }); renderB(); renderCustSel(); break;
+        audit({ action: 'دفع فاتورة مورد', detail: `${SUPPLIERS[o.sid].short} · ${fmt(amount)} د.ع ${ch === 'wallet' ? 'بالمحفظة' : 'كاش'}`, by: 'التاجر', model: '—', tier: 'حركة فلوس · رمز PIN' });
+        renderA(); if (S.B.mode === 'sup' && S.B.sid === o.sid) toastB(`وصلت دفعة من ${SHOP.name}`, `${fmt(amount)} د.ع`, { ok: true }); renderB(); renderCustSel(); break;
       }
       case 'count': A.count = A.count === a.dataset.sku ? null : a.dataset.sku; renderA(); break;
       case 'saveCount': {
         const sku = a.dataset.sku; const counted = +$('#countIn').value; if ($('#countIn').value === '') break;
         const stock = L.stockOf(sku); const delta = counted - stock; const p = productBySku(sku); A.count = null;
         if (delta) { const cost = L.currentCost(sku); L.add({ type: 'adjust', channel: 'none', items: [{ sku, qty: delta, cost }], amount: Math.abs(delta) * cost, shrink: delta < 0, note: `جرد ${p.name}: ${delta < 0 ? 'ناقص' : 'زايد'} ${Math.abs(delta)}` });
-          event(`جرد ${p.name}: الدفتر ${stock} والرف ${counted} (${delta > 0 ? '+' : ''}${delta}).`); toastA(delta < 0 ? 'اكو نقص بالمخزون' : 'تعدّل المخزون', `${p.name}: ${delta > 0 ? '+' : ''}${delta}`, { icon: 'box' }); runAuto(); }
+          event(`جرد ${p.name}: الدفتر ${stock} والرف ${counted} (${delta > 0 ? '+' : ''}${delta}).`);
+          audit({ action: 'جرد', detail: `${p.name}: ${delta > 0 ? '+' : ''}${delta}`, by: 'التاجر', model: '—', tier: 'تسجيل' }); toastA(delta < 0 ? 'اكو نقص بالمخزون' : 'تعدّل المخزون', `${p.name}: ${delta > 0 ? '+' : ''}${delta}`, { icon: 'box' }); runAuto(); }
         else toastA('المخزون مطابق', p.name, { ok: true, icon: 'check' });
         break;
       }
@@ -816,11 +857,13 @@ document.addEventListener('click', async (ev) => {
         toastA(n ? `انحفظت ${n} سطور` : 'ماكو سطور مأكدة', n ? 'ووصل للزبائن طلب تأكيد' : 'صحح الحقول الحمر أول'); break;
       }
       case 'mic': startMic(); break;
+      case 'heardOk': { const t = ($('#chatIn')?.value || A.heard?.text || '').trim(); A.heard = null; sendChat(t, { voice: true }); break; }
+      case 'heardEdit': A.heard = null; renderA(); setTimeout(() => $('#chatIn')?.focus(), 30); break;
       case 'actRem': { const m = A.chat[+a.dataset.i]; m.act.done = true; renderA(); await startAction({ tool: 'remind', args: { name: customerById(a.dataset.id).name } }, 'button'); break; }
       case 'actOrd': { const m = A.chat[+a.dataset.i]; m.act.done = true; renderA(); await startAction({ tool: 'order', args: { supplier: a.dataset.id } }, 'button'); break; }
       case 'actSend': {
         const m = A.chat[+a.dataset.i]; const act = m.act; if (act.status !== 'ready') break;
-        if (act.kind === 'remind') { act.text = document.querySelector(`#actText${a.dataset.i}`)?.value || act.text; sendReminderTo(act.cid, act.text); }
+        if (act.kind === 'remind') { act.text = document.querySelector(`#actText${a.dataset.i}`)?.value || act.text; if (sendReminderTo(act.cid, act.text) === false) { act.status = 'cancelled'; renderA(); break; } }
         else { const o = makeOrder(act.sid, act.items); S.orders.push(o); sentOrder(o, 'بطلب منك بالمساعد'); }
         act.status = 'sent'; renderA(); break;
       }
@@ -882,6 +925,7 @@ document.addEventListener('click', async (ev) => {
   if (p) {
     switch (p.dataset.p) {
       case 'tab': S.tab = p.dataset.k; renderPanel(); break;
+      case 'undo': if (undoAudit(p.dataset.id)) { toastA('تراجعت عن العملية', '', { icon: 'check' }); renderA(); } else toastA('ما يصير تتراجع', 'فاتت 5 دقايق أو العملية ما تتراجع'); renderPanel(); break;
       case 'flowKey': flowStop(); S.flow.key = p.dataset.k; S.flow.sel = -1; renderPanel(); break;
       case 'flowStep': flowStop(); S.flow.sel = +p.dataset.i; renderPanel(); break;
       case 'flowPlay': flowPlay(); break;
@@ -949,7 +993,8 @@ async function afterRecording(dataUrl, seconds) {
     A.transcribing = false;
     if (!text) { renderA(); toastA('ما سمعت كلام واضح', 'حاول مرة ثانية بمكان أهدأ'); return; }
     event(`تحويل الصوت لنص بـGemini (${(ms / 1000).toFixed(1)} ث): «${text}»`);
-    A.tab = 'chat'; A.sub = null; sendChat(text, { voice: true });
+    // «سمعتك: … صح؟» — nothing is sent or saved until the owner confirms what was heard
+    A.tab = 'chat'; A.sub = null; A.heard = { text, ms }; A.draft = text; renderA(); setTimeout(() => $('#chatIn')?.focus(), 30);
   } catch (e) { A.transcribing = false; renderA(); toastA('ما گدرت أحول الصوت لنص', 'جرّب مرة ثانية أو اكتب'); }
 }
 function browserMic() {

@@ -73,6 +73,13 @@ export class Ledger {
     if (t.channel === 'cash' || t.type === 'transfer') { const c = this.closings.at(-1); c.expected += cashEffect(t); }
     return t;
   }
+  // undo: take a transaction back out (used by the audit log's «تراجع» within 5 minutes)
+  remove(id) {
+    const i = this.tx.findIndex((t) => t.id === id); if (i < 0) return null;
+    const [t] = this.tx.splice(i, 1);
+    if (t.channel === 'cash' || t.type === 'transfer') { const c = this.closings.at(-1); c.expected -= cashEffect(t); }
+    return t;
+  }
   rateOn(date) { const d = Math.max(0, Math.min(this.fx.length - 1, daysBetween(START, date))); return this.fx[d]; }
   currentCost(sku) {
     const p = productBySku(sku);

@@ -321,3 +321,10 @@ td.n { direction: ltr; text-align: right; font-feature-settings: 'tnum'; white-s
 @media (max-width: 700px) { .fctl .btn { padding: 5px 8px; } }
 .fsvgwrap.big { display: flex; justify-content: center; background: #fff; }
 .fsvgwrap.big .flowsvg { width: auto; max-width: 100%; max-height: 64vh; }
+.heard { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; background: var(--info-50); color: var(--info); border-radius: 12px; padding: 7px 10px; margin: 0 10px 6px; font-size: 13px }
+.heard span { flex: 1; min-width: 140px; color: var(--ink) }
+.tiers { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 12px 14px }
+.tiers div { background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 7px 9px; font-size: 12px; line-height: 1.5 }
+.tiers b { display: block; color: var(--brand); font-size: 12.5px }
+.tbl.audit { margin: 0 14px; width: calc(100% - 28px) } .tbl.audit tr.undone td { opacity: .55; text-decoration: line-through }
+.tbl.audit tr.undone td:last-child { text-decoration: none; opacity: 1 }
