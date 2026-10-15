@@ -52,7 +52,8 @@ const REFUSALS = {
 
 export function friendlyErr(e) {
   const m = String(e?.message || e);
-  if (/quota|rate/i.test(m)) return 'Gemini وصل لحد الاستخدام المجاني بالدقيقة';
+  if (/daily quota|PerDay/i.test(m)) return 'النموذج وصل لحد الاستخدام المجاني اليومي';
+  if (/quota|rate/i.test(m)) return 'النموذج وصل لحد الاستخدام المجاني بالدقيقة';
   if (/high demand|overloaded|UNAVAILABLE/i.test(m)) return 'Gemini مشغول هسه';
   if (/abort/i.test(m)) return 'Gemini تأخر بالرد';
   if (/API key/i.test(m)) return 'مفتاح Gemini مو صحيح';
@@ -78,7 +79,7 @@ export async function route(q, { useLLM = true } = {}) {
   if (useLLM && llmStatus().ok) {
     try {
       const sent = mask(q);
-      const { text, ms } = await callLLM({ system: ROUTER, messages: [{ role: 'user', content: sent }], json: true, maxTokens: 200, timeoutMs: 12000 });
+      const { text, ms } = await callLLM({ system: ROUTER, messages: [{ role: 'user', content: sent }], json: true, maxTokens: 200, timeoutMs: 22000 });
       const j = extractJSON(text);
       if (j?.args?.name && /^C\d+$/.test(j.args.name)) j.args.name = nameOfCode(j.args.name) || j.args.name;
       if (j) j.sent = sent;
@@ -237,7 +238,7 @@ export async function ask(L, q, { useLLM = true } = {}) {
   let answer = tmpl, answerSource = 'template', problems = [];
   if (useLLM && llmStatus().ok && res && !res.empty) {
     try {
-      const { text, ms } = await callLLM({ system: WRITER, messages: [{ role: 'user', content: mask(`السؤال: ${q}\nنتيجة الأداة ${r.tool}: ${compact(res)}`) }], json: true, maxTokens: 400, timeoutMs: 12000 });
+      const { text, ms } = await callLLM({ system: WRITER, messages: [{ role: 'user', content: mask(`السؤال: ${q}\nنتيجة الأداة ${r.tool}: ${compact(res)}`) }], json: true, maxTokens: 400, timeoutMs: 22000 });
       const j = extractJSON(text);
       if (j?.answer) j.answer = unmask(j.answer);
       if (j?.answer) {

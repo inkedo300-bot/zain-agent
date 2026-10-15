@@ -45,11 +45,11 @@ const CACHE_MAX = 400, CACHE_MS = 60 * 60 * 1000;
 const cacheKey = (b) => (b.images?.length ? null : JSON.stringify([b.system, b.messages, b.json, b.tier, b.max_tokens]));
 
 // free-tier pacing: stay under each model's requests-per-minute instead of hitting 429s.
-// A call waits (up to 12 s) for a free slot; if none comes it moves on to the next model.
-const RPM = { [MODEL]: +process.env.GEMINI_RPM || 14, [MODEL_STRONG]: 4, [GROQ_MODEL]: +process.env.GROQ_RPM || 28 };
+// A call waits (up to 18 s) for a free slot; if none comes it moves on to the next provider.
+const RPM = { [MODEL]: +process.env.GEMINI_RPM || 13, [MODEL_STRONG]: 4, [GROQ_MODEL]: +process.env.GROQ_RPM || 28 };
 const recent = {};
 async function slot(m) {
-  const lim = RPM[m] || 10, until = Date.now() + 12000;
+  const lim = RPM[m] || 10, until = Date.now() + 18000;
   for (;;) {
     const now = Date.now();
     recent[m] = (recent[m] || []).filter((t) => now - t < 60000);
@@ -76,14 +76,18 @@ async function llm(req, b) {
   if (!plan.length) { const e = new Error('no model key'); e.status = 503; throw e; }
   let last;
   for (const [prov, m] of plan) {
-    if (!(await slot(m))) { last = Object.assign(new Error('rate limit (paced)'), { retryable: true }); continue; }
+    if (!(await slot(m))) { last = Object.assign(new Error('rate limit (paced)'), { retryable: true, quota: true }); continue; }
     try {
       const out = prov === 'groq' ? await groqOnce(qKey, b, m) : await geminiOnce(gKey, b, m);
       count(prov + ':' + m);
       const v = { text: out.text, model: out.modelVersion || m, provider: prov };
       if (ck) { cache.set(ck, { at: Date.now(), v }); if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value); }
       return v;
-    } catch (e) { last = e; if (!e.retryable) throw e; }
+    } catch (e) {
+      last = e; if (!e.retryable) throw e;
+      // a per-minute or per-day limit on the fast model is not a reason to burn Flash's ~20/day
+      if (e.quota && prov === 'gemini' && m === MODEL && b.tier !== 'strong') { const i = plan.findIndex((p) => p[1] === MODEL_STRONG); if (i > -1) plan.splice(i, 1); }
+    }
   }
   throw last;
 }
@@ -126,10 +130,10 @@ async function geminiOnce(key, { system, messages, images = [], max_tokens = 800
       method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': key }, body: payload,
     });
     j = await r.json();
-    if (r.ok || ![429, 500, 503].includes(r.status)) break;
+    if (r.ok || ![500, 503].includes(r.status)) break;
     await new Promise((res) => setTimeout(res, 900));
   }
-  if (!r.ok) { const err = new Error(j.error?.message || `gemini http ${r.status}`); err.retryable = [429, 500, 503, 404].includes(r.status); throw err; }
+  if (!r.ok) { const err = new Error(j.error?.message || `gemini http ${r.status}`); err.retryable = [429, 500, 503, 404].includes(r.status); err.quota = r.status === 429; if (/PerDay/.test(JSON.stringify(j))) err.message = 'daily quota: ' + err.message; throw err; }
   const text = (j.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('');
   if (!text) { const err = new Error('gemini empty (' + (j.candidates?.[0]?.finishReason || j.promptFeedback?.blockReason || 'no text') + ')'); err.retryable = true; throw err; }
   return { text, modelVersion: j.modelVersion };
