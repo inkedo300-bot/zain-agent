@@ -5,6 +5,7 @@
 // ─────────────────────────────────────────────────────────────
 import { norm, findCustomer, findProduct } from './ledger.js';
 import { PRODUCTS, CUSTOMERS, SUPPLIERS } from './data.js';
+import { normalizeIraqi, NUMBERS, MULTIPLIERS } from './lexicon.js';
 
 const has = (t, words) => words.some((w) => t.includes(norm(w)));
 const MONTHS = { 'كانون الثاني': 1, 'شباط': 2, 'اذار': 3, 'نيسان': 4, 'ايار': 5, 'حزيران': 6, 'تموز': 7, 'اب': 8, 'ايلول': 9, 'تشرين الاول': 10, 'تشرين الثاني': 11, 'كانون الاول': 12 };
@@ -42,14 +43,15 @@ const W = {
 
 // returns { tool, args } | { refuse, reason } | { tool: 'unknown' }
 export function routeOffline(q) {
-  const t = ' ' + norm(q) + ' ';
-  const per = detectPeriod(q);
+  const qn = normalizeIraqi(q); // dialect variants → words the rules below know (lexicon.js)
+  const t = ' ' + qn + ' ';
+  const per = detectPeriod(qn);
   if (has(t, W.offtopic)) return { refuse: true, reason: 'offtopic' };
   if (per?.period === 'out_of_range') return { refuse: true, reason: 'out_of_range' };
   const cust = findCustomer(q);
   // a name that looks like a customer but is not in the book
   const nameLike = t.match(/(ابو|ام|حجي|سيد|ست)\s+(\S+)/);
-  const product = findProduct(q);
+  const product = findProduct(q) || findProduct(qn);
   const unknownProduct = !product && /(من|بال|ب)\s*(الدجاج|اللحم|الخضره|الفواكه|الموبايلات|الذهب)/.test(t);
   if (unknownProduct) return { refuse: true, reason: 'unknown_product' };
 
@@ -86,39 +88,53 @@ export function routeOffline(q) {
   return { tool: 'unknown' };
 }
 
-// ── numbers in Iraqi speech ──
-const UNITS = { 'واحد': 1, 'وحده': 1, 'ثنين': 2, 'اثنين': 2, 'ثنتين': 2, 'ثلاث': 3, 'ثلاثه': 3, 'تلاث': 3, 'اربع': 4, 'اربعه': 4, 'خمس': 5, 'خمسه': 5, 'ست': 6, 'سته': 6,
-  'سبع': 7, 'سبعه': 7, 'ثمان': 8, 'ثمانيه': 8, 'ثمن': 8, 'تسع': 9, 'تسعه': 9, 'عشر': 10, 'عشره': 10, 'درزن': 12, 'نص': 0.5 };
-const TENS = { 'عشرين': 20, 'ثلاثين': 30, 'تلاثين': 30, 'اربعين': 40, 'خمسين': 50, 'ستين': 60, 'سبعين': 70, 'ثمانين': 80, 'تسعين': 90, 'ميه': 100, 'مية': 100, 'ميتين': 200, 'ثلاثميه': 300, 'اربعميه': 400, 'خمسميه': 500 };
+// ── numbers in Iraqi speech (word list in lexicon.js: «خمسطعش»، «ثلثين»، «عشرت تالاف») ──
+const numWord = (tk) => {
+  if (NUMBERS[tk] != null || MULTIPLIERS[tk] != null) return tk;
+  const w = tk.replace(/^[وب]/, ''); // «وعشرين»، «بخمسطعش»
+  return w !== tk && (NUMBERS[w] != null || MULTIPLIERS[w] != null) ? w : null;
+};
 export function wordsToNumber(s) {
-  const toks = norm(s).split(/\s+|و(?=\S)/).filter(Boolean);
-  let total = 0, cur = 0, seen = false;
-  for (const tk of toks) {
-    const w = tk.replace(/^و/, '');
-    if (UNITS[w] != null) { cur += UNITS[w]; seen = true; }
-    else if (TENS[w] != null) { cur += TENS[w]; seen = true; }
-    else if (/^(الف|الاف|ألف|آلاف)$/.test(w)) { total += (cur || 1) * 1000; cur = 0; seen = true; }
-    else if (w === 'مليون') { total += (cur || 1) * 1e6; cur = 0; seen = true; }
-    else if (w === 'ربع' ) { cur += 0.25; seen = true; }
+  let total = 0, cur = 0, seen = false, lastMult = 0;
+  for (const tk of norm(s).split(/\s+/).filter(Boolean)) {
+    const w = numWord(tk);
+    if (!w) continue;
+    seen = true;
+    if (NUMBERS[w] != null) {
+      const v = NUMBERS[w];
+      if (v > 0 && v < 1 && !cur && lastMult) total += v * lastMult; // «الف ونص» = 1500، «مليون وربع»
+      else cur += v;
+    } else {
+      const m = MULTIPLIERS[w];
+      if (w === 'الفين' || w === 'مليونين') { total += m; lastMult = m / 2; }
+      else { total += (cur || 1) * m; lastMult = m; }
+      cur = 0;
+    }
   }
   return seen ? total + cur : null;
 }
+// runs of consecutive number words: «ست نور سددت خمسة وعشرين الف» → [ست] [خمسه وعشرين الف]
+export function numberRuns(text) {
+  const runs = []; let run = [];
+  const flush = () => { if (run.length) runs.push({ words: run.join(' '), value: wordsToNumber(run.join(' ')), mult: run.some((w) => MULTIPLIERS[numWord(w)] != null) }); run = []; };
+  for (const tk of norm(text).replace(/[؟?!.,،]/g, ' ').split(/\s+/).filter(Boolean)) numWord(tk) ? run.push(tk) : flush();
+  flush();
+  return runs;
+}
 export function parseAmount(text) {
   const t = norm(text).replace(/٬|،/g, ',');
-  const m = t.match(/(\d[\d,.]*)\s*(الف|الاف|ألف|آلاف|k|مليون)?/);
+  const m = t.match(/(\d[\d,.]*)\s*(الف|الاف|تالاف|k|مليون)?/);
   if (m) {
     let v = +m[1].replace(/,/g, '');
     if (m[2] === 'مليون') v *= 1e6; else if (m[2]) v *= 1000;
     return v;
   }
-  const w = t.match(/((?:\S+\s+)?(?:\S+\s+)?(?:الف|الاف|مليون))/);
-  if (w) return wordsToNumber(w[1]);
-  return null;
+  return numberRuns(t).find((r) => r.mult)?.value ?? null;
 }
 
 // ── free-text entry: «بعت 3 كراتين ببسي لأبو حسين بالدين» ──
 export function parseEntryOffline(text) {
-  const t = ' ' + norm(text) + ' ';
+  const t = ' ' + normalizeIraqi(text) + ' ';
   const out = { raw: text, type: null, customer: null, items: [], amount: null, channel: null, missing: [], confidence: 0.9 };
   const cust = findCustomer(text);
   if (cust) out.customer = cust.id;
@@ -127,13 +143,14 @@ export function parseEntryOffline(text) {
   else if (has(t, ['مصروف', 'دفعت', 'صرفت'])) out.type = 'expense';
   else if (has(t, ['اشتريت', 'جبت بضاعه', 'من المورد', 'استلمت بضاعه'])) out.type = 'purchase';
   else if (has(t, ['بعت', 'بيع', 'انباع'])) out.type = 'sale';
-  // items: look for "<qty> <product>"
+  // items: look for "<qty> <product>" (the customer's name is cut out first, so «ست نور» is not 6)
+  const ti = cust ? t.replace(norm(cust.name), ' ') : t;
   for (const p of PRODUCTS) {
     for (const a of [p.name, ...p.alias]) {
       const an = norm(a);
-      const idx = t.indexOf(an);
+      const idx = ti.indexOf(an);
       if (idx < 0) continue;
-      const before = t.slice(Math.max(0, idx - 22), idx).trim().split(/\s+/).slice(-3).join(' ');
+      const before = ti.slice(Math.max(0, idx - 22), idx).trim().split(/\s+/).slice(-3).join(' ');
       let qty = null;
       const dm = before.match(/(\d+)\s*\S*$/);
       if (dm) qty = +dm[1];
@@ -143,21 +160,27 @@ export function parseEntryOffline(text) {
     }
   }
   // explicit amount («بـ 15 الف» or «15000») — only if not the item quantity
-  const am = t.match(/(?:ب|بـ|مبلغ|قيمته|بسعر)\s*(\d[\d,]*\s*(?:الف|الاف)?|[^\d\s]+\s+(?:الف|الاف))/) || (out.type === 'payment_in' || out.type === 'expense' ? [null, t] : null);
+  const am = t.match(/(?:ب|بـ|مبلغ|قيمته|بسعر)\s*(\d[\d,]*\s*(?:الف|الاف|تالاف)?|[^\d\s]+\s+(?:الف|الاف|تالاف))/) || (out.type === 'payment_in' || out.type === 'expense' ? [null, t] : null);
   if (am) { const v = parseAmount(am[1]); if (v && v >= 250) out.amount = v; }
+  // Iraqis drop «الف»: «انطاني خمسة وعشرين» = 25,000 (no note is smaller than 250)
+  if (!out.amount && !out.items.length && (out.type === 'payment_in' || out.type === 'expense')) {
+    const d = t.match(/(\d[\d,]*)(?![\d,])(?!\s*(?:الف|الاف|تالاف|مليون))/), runs = numberRuns(t).filter((r) => r.value >= 1);
+    const v = d ? +d[1].replace(/,/g, '') : runs.length ? runs[runs.length - 1].value : null;
+    if (v >= 1 && v < 250) { out.amount = v * 1000; out.amountGuessed = true; }
+  }
   if (!out.amount && out.items.length) out.amount = out.items.reduce((a, i) => a + i.qty * i.price, 0);
   if (out.type === 'expense') out.category = has(t, ['ايجار']) ? 'rent' : has(t, ['مولده']) ? 'gen' : has(t, ['اجره', 'العامل']) ? 'wage' : 'other';
   out.channel = out.type === 'credit_sale' ? 'credit' : has(t, ['محفظه', 'حول', 'دز', 'رابط']) ? 'wallet' : 'cash';
   if (!out.type) out.missing.push('type');
   if ((out.type === 'credit_sale' || out.type === 'payment_in') && !out.customer) out.missing.push('customer');
   if (!out.amount) out.missing.push('amount');
-  if (out.items.some((i) => i.qtyGuessed)) out.confidence = 0.6;
+  if (out.items.some((i) => i.qtyGuessed) || out.amountGuessed) out.confidence = 0.6;
   if (out.missing.length) out.confidence = Math.min(out.confidence, 0.4);
   return out;
 }
 
 export function looksLikeEntry(text) {
-  const t = ' ' + norm(text) + ' ';
+  const t = ' ' + normalizeIraqi(text) + ' ';
   if (/[؟?]/.test(text) || has(t, ['شكد', 'كم ', 'منو', 'شنو', 'اشكد', 'اشو', 'هل ', 'ليش', 'شلون', 'راح '])) return false;
   return has(t, ['بعت', 'سجل', 'سجلي', 'بالدين', 'سدد', 'انطاني', 'دفعت', 'صرفت', 'اشتريت', 'دينته', 'عالحساب']);
 }
@@ -166,10 +189,10 @@ export const customerNames = () => CUSTOMERS.map((c) => c.name);
 
 // ── commands: things the owner wants DONE, not asked ──
 // «ذكّر أم زينب»، «دزله رابط دفع لأبو علي»، «اطلب من الرافدين»
-const VOC = /^(يا\s*)?(علي|حبيبي|عيني|اخي|أخي|خويه|خوية|اغاتي|أغاتي|حجي|استاذ|أستاذ)[،,\s]+/u;
+const VOC = /^(يا\s*)?(علي|حبيبي|عيني|عيوني|اخي|أخي|اخوي|أخوي|خويه|خوية|اغاتي|أغاتي|حجي|استاذ|أستاذ|عمي|خالي|يمعود|معود|ابني|بويه|يابه|يبه|عزيزي)[،,\s]+/u;
 export const stripVocative = (q) => (q || '').replace(VOC, '').trim();
 export function detectAction(q) {
-  const t = ' ' + norm(stripVocative(q)) + ' ';
+  const t = ' ' + normalizeIraqi(stripVocative(q)) + ' ';
   const remind = /(ذكر|ذكره|ذكرها|ذكرهم|تذكير|رابط|طالب|طالبه|طالبها|دزله|دزلها|ارسله|ارسلها|ابعثله|ابعثلها)/.test(t) && !/(شكد|منو|شنو|كم |متى|ليش)/.test(t);
   if (remind) {
     const c = findCustomer(stripVocative(q).replace(/(ذكّ?ر|تذكير|برابط|رابط|الدفع|للدفع|دفع|طالب|دز|له|لها|ارسل|ابعث)/g, ' '));

@@ -16,6 +16,7 @@ import { mask, unmask, nameOfCode, CUSTOMER_CODES } from './privacy.js';
 import { norm } from './ledger.js';
 import { SUPPLIERS, PRODUCTS, fmt, dateAr, customerById } from './data.js';
 import { compact, validateAnswer, friendlyErr } from './agent.js';
+import { dialectGlossary, AGENT_CATS } from './lexicon.js';
 
 export const MAX_STEPS = 5;
 const PERIODS = ['today', 'yesterday', 'this_week', 'last_week', 'last7', 'prev7', 'this_month', 'last_month', 'last30'];
@@ -41,7 +42,8 @@ period واحد من: ${PERIODS.join(', ')} (last7 = آخر 7 أيام، prev7 =
   للجواب: {"final":"3 لـ5 جمل باللهجة العراقية لصاحب المحل","proposals":[{"type":"remind","customer":"C3"},{"type":"order","supplier":"S1"}]}
 قواعد: حد أقصى ${MAX_STEPS} أدوات. بسؤال «ليش» استخدم أداتين على الأقل: compare بين last7 وprev7 (فترتين متساويتين، لا تقارن أسبوع ناقص بأسبوع كامل)، وبعدها أداة تشرح السبب (expenses أو fxImpact أو anomalies أو topItems).
 بسؤال التخطيط استخدم forecast وdebts. لا تنادي صاحب المحل باسم، ولا تذكر أي رقم ما رجعته أداة، واكتب التواريخ بالكلام (مثل «5 تشرين الأول»). استخدم فقط الأرقام اللي رجعتها الأدوات وبنفس الشكل (مثل 1,250,000)، وممنوع تحسب رقم جديد.
-لا تنسب كلام لزبون ولا تگول إنك سويت شي. الاقتراحات اختيارية، وبس من نوع remind أو order، وصاحب المحل هو اللي يوافق عليها.`;
+لا تنسب كلام لزبون ولا تگول إنك سويت شي. الاقتراحات اختيارية، وبس من نوع remind أو order، وصاحب المحل هو اللي يوافق عليها.
+${dialectGlossary({ cats: AGENT_CATS, perEntry: 2 })}`;
 
 // ── read-only tools ──
 function compare(L, { metric = 'profit', a = 'last7', b = 'prev7' } = {}) {
