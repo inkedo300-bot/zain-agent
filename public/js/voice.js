@@ -44,3 +44,58 @@ function encodeWav(samples, rate) {
   return b;
 }
 const blobToDataURL = (blob) => new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); });
+
+// Speech → text on the server's other engines: 'grok' (xAI) or 'whisper' (Whisper large-v3-turbo on Groq).
+export async function sttRemote(engine, dataUrl, prompt) {
+  const r = await fetch('/api/stt', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ engine, audio: dataUrl, prompt }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || 'stt_http_' + r.status);
+  return j;
+}
+
+// Text → speech. Grok voice (xAI) when the server has a key, otherwise the browser's Arabic voice,
+// so a demo without keys still talks. Only one answer plays at a time.
+let current = null;
+export function stopSpeaking() {
+  if (current) { current.cancel(); current = null; }
+  try { window.speechSynthesis?.cancel(); } catch {}
+}
+export const isSpeaking = () => !!current;
+// what the ear needs, not the eye: currency and symbols as words, no markup
+export function speakable(text) {
+  return String(text || '').replace(/<[^>]+>/g, ' ').replace(/[«»"*_#]/g, '').replace(/د\.ع/g, 'دينار')
+    .replace(/(\d),(?=\d{3})/g, '$1').replace(/\s+/g, ' ').trim().slice(0, 1200);
+}
+export async function speak(text, { engine = null, onEnd } = {}) {
+  stopSpeaking();
+  const t = speakable(text); if (!t) return null;
+  let cancelled = false;
+  const me = { engine: null, cancel: () => { cancelled = true; } };
+  current = me;
+  const done = () => { if (current === me) current = null; onEnd?.(); };
+  if (engine === 'grok') {
+    try {
+      const r = await fetch('/api/tts', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: t }) });
+      if (!r.ok) throw new Error('tts_http_' + r.status);
+      const url = URL.createObjectURL(await r.blob());
+      if (cancelled) { URL.revokeObjectURL(url); return null; }
+      const a = new Audio(url);
+      me.engine = 'grok';
+      me.cancel = () => { cancelled = true; a.pause(); URL.revokeObjectURL(url); };
+      a.onended = () => { URL.revokeObjectURL(url); done(); };
+      await a.play();
+      return me;
+    } catch { if (cancelled) return null; /* fall through to the browser voice */ }
+  }
+  const synth = window.speechSynthesis;
+  if (!synth) { done(); return null; }
+  const u = new SpeechSynthesisUtterance(t);
+  const voices = synth.getVoices();
+  u.voice = voices.find((v) => /ar[-_](IQ|KW|SA|AE)/i.test(v.lang)) || voices.find((v) => /^ar/i.test(v.lang)) || null;
+  u.lang = u.voice?.lang || 'ar-SA'; u.rate = 1;
+  me.engine = 'browser';
+  me.cancel = () => { cancelled = true; synth.cancel(); };
+  u.onend = done; u.onerror = done;
+  synth.speak(u);
+  return me;
+}

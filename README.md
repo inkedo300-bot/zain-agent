@@ -3,6 +3,7 @@
 > The owner speaks Iraqi Arabic. **Fixed workflows** handle anything that writes to the ledger or moves money; an **agent with read-only tools** handles open questions («why did my profit drop?») and can only *propose* actions.
 > The model never computes a number, never sees a customer's name, and every write goes through an approval card (money needs a PIN) and an audit log with undo.
 > Every outgoing transfer passes a **transfer safety check**: 22 weighted signals about the recipient and the session (reports, brand-new account, cash-out within minutes, «ZainCash support» in the name, an active phone call, a recent OTP request…). Above 30 → light warning, above 60 → full awareness screen. Rules decide, not the model; the sender's age is never a signal (it only simplifies the wording, and a test proves the decision never changes).
+> **Voice:** speech-to-text tries Gemini (prompted with the shop's names) → Grok STT (xAI) → Whisper large-v3-turbo (Groq); answers are read aloud with Grok TTS (Gulf Arabic locale, closest to Basra; no Iraqi locale exists), or the browser's Arabic voice without a key. Settings has a side-by-side engine comparison on your own voice. Keys live only in the server's `.env`.
 > Run: `node server.js` (Node 18+, no dependencies) → http://localhost:8080 · `npm test` · `npm run eval`. All data is synthetic.
 
 # Zain Agent · دفتر — حسابات المحل داخل المحفظة
@@ -35,6 +36,18 @@ node server.js        # Node 18 أو أحدث، بدون أي مكتبات
 | الفهم والصياغة وحلقة الوكيل | Gemini Flash-Lite (`gemini-flash-lite-latest`)، أو Groq إذا موجود مفتاحه | سريع، و500 طلب باليوم مجاناً |
 | تفريغ الصوت | Gemini Flash-Lite | يسمع العربي ويعرف أسماء المحل |
 | قراءة صورة دفتر ورقي | Gemini Flash (`gemini-flash-latest`) | أدق بالخط اليدوي، بس حده المجاني 20 باليوم، فينستخدم لهالشغلة بس |
+
+### الصوت (اختياري)
+
+| المهمة | المحرك | المفتاح |
+|---|---|---|
+| تحويل الكلام لنص | **Gemini** أولاً (يعرف أسماء زباينك وموادك)، بعده **Grok STT**، بعده **Whisper large-v3-turbo** على Groq. الترتيب يتغير بـ`STT_ORDER` | `GEMINI_API_KEY` / `XAI_API_KEY` / `GROQ_API_KEY` |
+| قراءة الجواب بصوت | **Grok TTS** (صوت `ara`). ماكو لهجة عراقية بـGrok، فالافتراضي الخليجية `ar-AE` لأنها أقرب للبصرة (`XAI_TTS_LANG`) | `XAI_API_KEY` |
+| بدون أي مفتاح | التعرف على الكلام وقراءة الجواب من المتصفح نفسه | — |
+
+ليش Whisper turbo مو الأول؟ بقياس منشور على العراقي (Arab Voices، 2026) Whisper turbo يهلوس ويكرر كلام على اللهجة العراقية (WER فوق 100%)، وlarge-v3 العادي أحسن منه بكثير. فـWhisper هنا احتياط، وأي نص بيه تكرار أو جمل جاهزة («اشتركوا بالقناة») ينرفض ويجرب المحرك اللي بعده. من **الإعدادات ← قارن المحركات بصوتك** تسجل جملة وحدة وتشوف شنو سمع كل محرك وبكم ثانية.
+
+بالمساعد: زر **اسمع** جنب كل جواب، والسؤال اللي ينسأل بالصوت ينقرا جوابه بصوت (يتغير من زر «رد صوتي» فوق). كل المفاتيح بالخادم بس (`.env`)، وما توصل للمتصفح.
 
 الخادم يوزّع الطلبات تحت حد كل نموذج بالدقيقة بدل ما يوصل لخطأ 429، ويحفظ الأجوبة المتكررة ساعة (كاش)، وإذا نموذج فشل ينتقل للثاني. `/api/health` يبين شكد استخدمت من كل نموذج.
 

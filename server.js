@@ -4,6 +4,7 @@
 //   1) a .env file next to this file:   GEMINI_API_KEY=...   GROQ_API_KEY=... (optional)
 //   2) or the environment variable GEMINI_API_KEY
 //   3) or paste it in the app (⚙︎ الإعدادات) — sent only to this local server, per request.
+// Voice keys (optional): XAI_API_KEY (Grok voice), GROQ_API_KEY (also runs Whisper turbo). Server-side only.
 import http from 'node:http';
 import { readFile, appendFile, mkdir } from 'node:fs/promises';
 import { readFileSync, existsSync } from 'node:fs';
@@ -26,6 +27,17 @@ const MODEL = process.env.GEMINI_MODEL || 'gemini-flash-lite-latest';
 const MODEL_STRONG = process.env.GEMINI_MODEL_STRONG || 'gemini-flash-latest';
 const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
 const TEXT_PROVIDER = process.env.LLM_TEXT_PROVIDER || (process.env.GROQ_API_KEY ? 'groq' : 'gemini');
+// Voice (see README «الصوت»):
+//   speech → text: Gemini (knows the shop's names) → Grok STT (xAI) → Whisper large-v3-turbo (on Groq), order set by STT_ORDER
+//   text → speech: Grok TTS (xAI). There is no Iraqi locale, so the Gulf one (closest to Basra speech) is the default.
+//   Without XAI_API_KEY the browser's own Arabic voice reads the answers.
+const WHISPER_MODEL = process.env.WHISPER_MODEL || 'whisper-large-v3-turbo';
+const XAI_STT_MODEL = process.env.XAI_STT_MODEL || 'grok-voice-transcribe-2.0';
+const XAI_VOICE = process.env.XAI_VOICE || 'ara';
+const XAI_TTS_LANG = process.env.XAI_TTS_LANG || 'ar-AE';
+const XAI_BASE = process.env.XAI_BASE_URL || 'https://api.x.ai/v1';
+const GROQ_BASE = process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1';
+const STT_ORDER = (process.env.STT_ORDER || 'gemini,grok,whisper').split(',').map((x) => x.trim()).filter(Boolean);
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg' };
 
 const body = (req) => new Promise((res, rej) => {
@@ -35,6 +47,9 @@ const body = (req) => new Promise((res, rej) => {
 const send = (res, code, obj) => { res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(obj)); };
 const keyFor = (req) => process.env.GEMINI_API_KEY || req.headers['x-gemini-key'] || '';
 const groqKey = () => process.env.GROQ_API_KEY || '';
+const xaiKey = () => process.env.XAI_API_KEY || '';
+// which speech-to-text engines can run right now, in the configured order
+const sttEngines = (req) => STT_ORDER.filter((e) => (e === 'gemini' && keyFor(req)) || (e === 'grok' && xaiKey()) || (e === 'whisper' && groqKey()));
 
 // usage counters (shown in /api/health) and a small response cache: the same prompt
 // during a demo or an eval re-run does not spend the free quota twice
@@ -46,7 +61,7 @@ const cacheKey = (b) => (b.images?.length ? null : JSON.stringify([b.system, b.m
 
 // free-tier pacing: stay under each model's requests-per-minute instead of hitting 429s.
 // A call waits (up to 18 s) for a free slot; if none comes it moves on to the next provider.
-const RPM = { [MODEL]: +process.env.GEMINI_RPM || 13, [MODEL_STRONG]: 4, [GROQ_MODEL]: +process.env.GROQ_RPM || 28 };
+const RPM = { [MODEL]: +process.env.GEMINI_RPM || 13, [MODEL_STRONG]: 4, [GROQ_MODEL]: +process.env.GROQ_RPM || 28, [WHISPER_MODEL]: 18, [XAI_STT_MODEL]: 30, 'xai-tts': 30 };
 const recent = {};
 async function slot(m) {
   const lim = RPM[m] || 10, until = Date.now() + 18000;
@@ -139,6 +154,49 @@ async function geminiOnce(key, { system, messages, images = [], max_tokens = 800
   return { text, modelVersion: j.modelVersion };
 }
 
+// ── voice ──
+const audioFile = (dataUrl) => {
+  const m = /^data:(audio\/[\w.+-]+)(?:;[^,]*)?;base64,(.*)$/.exec(dataUrl || '');
+  if (!m) throw Object.assign(new Error('bad audio'), { status: 400 });
+  const ext = { 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/webm': 'webm', 'audio/mpeg': 'mp3', 'audio/ogg': 'ogg', 'audio/mp4': 'm4a' }[m[1]] || 'wav';
+  return { blob: new Blob([Buffer.from(m[2], 'base64')], { type: m[1] }), name: 'speech.' + ext };
+};
+async function sttOnce(engine, { audio, prompt }) {
+  const { blob, name } = audioFile(audio);
+  const f = new FormData();
+  let url, key, m;
+  if (engine === 'whisper') {
+    url = GROQ_BASE + '/audio/transcriptions'; key = groqKey(); m = WHISPER_MODEL;
+    f.append('model', m); f.append('language', 'ar'); f.append('temperature', '0'); f.append('response_format', 'json');
+    // Whisper reads up to ~224 tokens of prompt: the shop's words steer spelling toward them
+    if (prompt) f.append('prompt', String(prompt).slice(0, 400));
+  } else if (engine === 'grok') {
+    url = XAI_BASE + '/stt'; key = xaiKey(); m = XAI_STT_MODEL;
+    f.append('model', m);
+  } else throw Object.assign(new Error('unknown engine'), { status: 400 });
+  if (!key) throw Object.assign(new Error('no key for ' + engine), { status: 503 });
+  f.append('file', blob, name);
+  if (!(await slot(m))) throw Object.assign(new Error('rate limit (paced)'), { status: 429 });
+  const r = await fetch(url, { method: 'POST', headers: { authorization: 'Bearer ' + key }, body: f });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error(j.error?.message || j.error || `${engine} http ${r.status}`), { status: 502 });
+  count(engine + ':' + m);
+  return { text: (j.text || '').trim(), model: m };
+}
+const ttsCache = new Map();
+async function ttsOnce(text) {
+  const ck = XAI_VOICE + '|' + XAI_TTS_LANG + '|' + text;
+  if (ttsCache.has(ck)) return ttsCache.get(ck);
+  if (!(await slot('xai-tts'))) throw Object.assign(new Error('rate limit (paced)'), { status: 429 });
+  const r = await fetch(XAI_BASE + '/tts', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + xaiKey() },
+    body: JSON.stringify({ text, voice_id: XAI_VOICE, language: XAI_TTS_LANG, text_normalization: true, output_format: { codec: 'mp3', sample_rate: 24000, bit_rate: 64000 } }) });
+  if (!r.ok) { const j = await r.json().catch(() => ({})); throw Object.assign(new Error(j.error?.message || j.error || `grok tts http ${r.status}`), { status: 502 }); }
+  const buf = Buffer.from(await r.arrayBuffer());
+  count('xai:tts');
+  ttsCache.set(ck, buf); if (ttsCache.size > 60) ttsCache.delete(ttsCache.keys().next().value);
+  return buf;
+}
+
 http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://x');
@@ -147,7 +205,22 @@ http.createServer(async (req, res) => {
       const textProv = TEXT_PROVIDER === 'groq' && q ? 'groq' : key ? 'gemini' : q ? 'groq' : null;
       return send(res, 200, { llm: !!(key || q), provider: textProv, model: textProv === 'groq' ? GROQ_MODEL : key ? MODEL : null,
         media: key ? MODEL : null, providers: { gemini: !!key, groq: !!q }, usage,
-        keySource: process.env.GEMINI_API_KEY || q ? 'server' : key ? 'browser' : null });
+        keySource: process.env.GEMINI_API_KEY || q ? 'server' : key ? 'browser' : null,
+        voice: { stt: sttEngines(req), tts: xaiKey() ? 'grok' : null, ttsVoice: xaiKey() ? XAI_VOICE : null, ttsLang: XAI_TTS_LANG, whisper: WHISPER_MODEL } });
+    }
+    if (url.pathname === '/api/stt' && req.method === 'POST') {
+      const b = await body(req);
+      const t0 = Date.now();
+      try { const out = await sttOnce(b.engine, b); return send(res, 200, { ...out, engine: b.engine, ms: Date.now() - t0 }); }
+      catch (e) { return send(res, e.status || 500, { error: String(e.message || e) }); }
+    }
+    if (url.pathname === '/api/tts' && req.method === 'POST') {
+      if (!xaiKey()) return send(res, 503, { error: 'no XAI_API_KEY' });
+      const b = await body(req);
+      const text = String(b.text || '').trim().slice(0, 1500);
+      if (!text) return send(res, 400, { error: 'no text' });
+      try { const buf = await ttsOnce(text); res.writeHead(200, { 'content-type': 'audio/mpeg', 'content-length': buf.length, 'cache-control': 'no-store' }); return res.end(buf); }
+      catch (e) { return send(res, e.status || 500, { error: String(e.message || e) }); }
     }
     if (url.pathname === '/api/llm' && req.method === 'POST') {
       if (!keyFor(req) && !groqKey()) return send(res, 503, { error: 'no model key' });
@@ -176,5 +249,6 @@ http.createServer(async (req, res) => {
 }).listen(PORT, () => {
   console.log(`دفتر يشتغل → http://localhost:${PORT}`);
   console.log(process.env.GEMINI_API_KEY ? `Gemini: ${MODEL} (notebook photos: ${MODEL_STRONG})` : 'Gemini: no server key (paste one in the app settings, or run in offline mode)');
-  console.log(groqKey() ? `Groq: ${GROQ_MODEL} (text tasks: ${TEXT_PROVIDER})` : 'Groq: no key (optional)');
+  console.log(groqKey() ? `Groq: ${GROQ_MODEL} (text tasks: ${TEXT_PROVIDER}), speech: ${WHISPER_MODEL}` : 'Groq: no key (optional)');
+  console.log(xaiKey() ? `xAI Grok voice: TTS ${XAI_VOICE} (${XAI_TTS_LANG}), STT ${XAI_STT_MODEL}` : 'xAI: no key (optional; answers are read by the browser voice)');
 });
