@@ -7,8 +7,9 @@
   "scripts": {
     "start": "node server.js",
     "eval": "node eval/run_eval.mjs",
-    "test": "node tests/agent_llm.test.mjs && node tests/commands.test.mjs && node tests/security.test.mjs && node tests/fraud.test.mjs",
-    "eval:fraud": "node eval/run_fraud_eval.mjs"
+    "test": "node tests/agent_llm.test.mjs && node tests/commands.test.mjs && node tests/security.test.mjs && node tests/fraud.test.mjs && node tests/lexicon.test.mjs",
+    "eval:fraud": "node eval/run_fraud_eval.mjs",
+    "eval:dialect": "node eval/run_dialect_eval.mjs"
   },
   "engines": { "node": ">=18" }
 }

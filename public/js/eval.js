@@ -228,3 +228,63 @@ export async function evalAgent(L, { useLLM = false, pauseMs = 0, agentAsk } = {
   }
   return { n: rows.length, ok: rows.filter((r) => r.ok).length, byAgent: rows.filter((r) => r.source === 'agent').length, rows };
 }
+
+// ── 8. heavy dialect: words the old rules did not know (written together with lexicon.js, so a dev set, not held-out) ──
+export function dialectSet(L) {
+  const tx = L.tx;
+  const Q = (q, tool, truth) => ({ q, tool, truth });
+  const questions = [
+    Q('جم بعت اليوم؟', 'sales', T.sales(tx, 'today')),
+    Q('شكثر بعت لهسع؟', 'sales', T.sales(tx, 'today')),
+    Q('شقد صارت الحركة اليوم؟', 'sales', T.sales(tx, 'today')),
+    Q('اشگد كسبت هلاسبوع؟', 'profit', T.net(tx, 'this_week')),
+    Q('شكد مكسبي هالجمعة؟', 'profit', T.net(tx, 'this_week')),
+    Q('الجمعة اللي طافت شكد بعت؟', 'sales', T.sales(tx, 'last_week')),
+    Q('شكد طلعتلي فايدة الشهر الي فات؟', 'profit', T.net(tx, 'last_month')),
+    Q('شهر سبعة شكد ربحت؟', 'profit', T.net(tx, 'month', 7)),
+    Q('شكد ربحت بشهر ثمانية؟', 'profit', T.net(tx, 'month', 8)),
+    Q('منو مطلوبلي فلوس؟', 'debts', T.debts(tx)),
+    Q('منو بعد ما صفّى حسابه؟', 'debts', T.debts(tx)),
+    Q('شكد صرفيات هلشهر؟', 'expenses', T.exp(tx, 'this_month')),
+    Q('شكد دفعت كري المحل آخر 30 يوم؟', 'expenses', T.exp(tx, 'last30', null, 'rent')),
+    Q('الامبيرات شكد اخذت هالشهر؟', 'expenses', T.exp(tx, 'this_month', null, 'gen')),
+    Q('شكد راحت يومية الصانع هالشهر؟', 'expenses', T.exp(tx, 'this_month', null, 'wage')),
+    Q('زين كاش بيه شكد؟', 'position', T.wallet(L)),
+    Q('شكد عندي بالدرج هسع؟', 'position', null),
+    Q('راح تمشيني الفلوس للشهر الياي؟', 'forecast', null),
+    Q('تسد الفلوس للكري؟', 'forecast', null),
+    Q('اكو خربطة بالحسابات؟', 'anomalies', null),
+    Q('الحساب ملخبط؟', 'anomalies', null),
+    Q('شيربحني اكثر؟', 'topItems', null),
+    Q('الاخضر شكد ضربني هالشهر؟', 'fxImpact', null),
+    Q('شكد ضايل تمن؟', 'inventory', T.stock(tx, 'rice')),
+    Q('الستوك شنو بيه ناقص؟', 'inventory', null),
+    Q('شنو خلصان من البضاعة؟', 'inventory', null),
+    Q('شنو لازم اوصي من البضاعة؟', 'reorder', null),
+    Q('شكد بعت بالأجل هالجمعة؟', 'sales', T.sales(tx, 'this_week', null, 'credit')),
+    Q('شكد بعت عالدفتر هلاسبوع؟', 'sales', T.sales(tx, 'this_week', null, 'credit')),
+    Q('هلشهر شكد انباع عالمحفضة؟', 'sales', T.sales(tx, 'this_month', null, 'wallet')),
+    Q('شكد صافيلي هالشهر؟', 'profit', T.net(tx, 'this_month')),
+  ];
+  const entries = [
+    { t: 'ابو حسين صفّى حسابه 20 الف', type: 'payment_in', customer: 'C1', amount: 20000 },
+    { t: 'ام زينب نطتني خمسطعش الف', type: 'payment_in', customer: 'C2', amount: 15000 },
+    { t: 'خليها على ابو علي 2 كيلو تمن', type: 'credit_sale', customer: 'C3', sku: 'rice', qty: 2, amount: 4000 },
+    { t: 'دفعت كري المحل 500 الف', type: 'expense', amount: 500000 },
+    { t: 'دفعت الامبيرات 75 الف', type: 'expense', amount: 75000 },
+    { t: 'بعت ثنعش كارتون ماي', type: 'sale', sku: 'water', qty: 12, amount: 36000 },
+    { t: 'علاوي دز عشرين الف على زين كاش', type: 'payment_in', customer: 'C8', amount: 20000 },
+    { t: 'حجي كاظم رجعلي ثلثين الف', type: 'payment_in', customer: 'C4', amount: 30000 },
+    { t: 'سجلها على ست نور باكيت جكاير', type: 'credit_sale', customer: 'C10', sku: 'cigs', qty: 1, amount: 3500 },
+    { t: 'مصطفى الحداد سدد عشرت تالاف', type: 'payment_in', customer: 'C6', amount: 10000 },
+    { t: 'سيد جاسم انطاني خمسة وعشرين', type: 'payment_in', customer: 'C5', amount: 25000 },
+    { t: 'بعت سبعطعش طبقة بيض', type: 'sale', sku: 'eggs', qty: 17, amount: 93500 },
+  ];
+  return { questions, entries };
+}
+export function evalDialect(L) {
+  const { questions, entries } = dialectSet(L);
+  const qRows = questions.map((x) => { const r = routeOffline(x.q); const res = runTool(L, r); const v = mainFigure(r, res)?.value ?? null; return { ...x, gotTool: r.tool || (r.refuse ? 'refuse' : '?'), got: v, ok: r.tool === x.tool && (x.truth == null || v === x.truth) }; });
+  const eRows = entries.map((x) => { const e = parseEntryOffline(x.t); const c = scoreEntry(e, x); return { t: x.t, ok: Object.values(c).every(Boolean), fields: c }; });
+  return { q: { n: qRows.length, ok: qRows.filter((r) => r.ok).length, rows: qRows }, e: { n: eRows.length, ok: eRows.filter((r) => r.ok).length, rows: eRows } };
+}

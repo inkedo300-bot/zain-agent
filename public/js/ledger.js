@@ -30,7 +30,9 @@ export const inP = (t, p) => t.date >= p.from && t.date <= p.to;
 export const coversData = (p) => p.to >= START && p.from <= TODAY;
 
 // ── Arabic name normalisation for fuzzy matching ──
-export const norm = (s) => (s || '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/گ/g, 'ك').replace(/چ/g, 'ج')
+// also folds Persian-keyboard letters (ک ی پ ڤ ژ) and Arabic-Indic digits (٢٥ → 25), common in Iraqi typing
+export const norm = (s) => (s || '').replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىی]/g, 'ي').replace(/[گک]/g, 'ك').replace(/چ/g, 'ج')
+  .replace(/پ/g, 'ب').replace(/ڤ/g, 'ف').replace(/ژ/g, 'ز').replace(/[٠-٩]/g, (d) => d.charCodeAt(0) - 0x660).replace(/[۰-۹]/g, (d) => d.charCodeAt(0) - 0x6f0)
   .replace(/[ًٌٍَُِّْـ]/g, '').replace(/\s+/g, ' ').trim();
 export function findCustomer(q) {
   const n = norm(q);
