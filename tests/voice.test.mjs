@@ -16,7 +16,9 @@ const fake = http.createServer((req, res) => {
     const raw = Buffer.concat(d); got.push({ url: req.url, auth: req.headers.authorization, type: req.headers['content-type'], raw });
     if (req.url === '/tts') { res.writeHead(200, { 'content-type': 'audio/mpeg' }); return res.end(Buffer.from('ID3fake-mp3')); }
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ text: req.url.startsWith('/groq') ? ' شكد بعت اليوم ' : 'ذكّر أم زينب' }));
+    res.end(JSON.stringify(req.url.startsWith('/groq')
+      ? { text: ' شكد بعت اليوم اشتركوا في القناة', segments: [{ text: ' شكد بعت اليوم ', no_speech_prob: 0.01, avg_logprob: -0.2, compression_ratio: 1.1 }, { text: ' اشتركوا في القناة', no_speech_prob: 0.9, avg_logprob: -0.9, compression_ratio: 1.2 }] }
+      : { text: 'ذكّر أم زينب' }));
   });
 }).listen(0);
 await new Promise((r) => fake.once('listening', r));
@@ -45,13 +47,13 @@ await check('health lists engines in STT_ORDER (gemini skipped: no key)', async 
   assert.deepEqual(h.voice.stt, ['grok', 'whisper']); assert.equal(h.voice.tts, 'grok');
   assert.ok(!JSON.stringify(h).includes('xk-test') && !JSON.stringify(h).includes('gk-test'));
 });
-await check('Whisper turbo: multipart to Groq with model, language=ar and the vocabulary prompt', async () => {
+await check('Whisper large-v3: multipart to Groq with model, temperature 0, verbose_json, language=ar and the vocabulary prompt', async () => {
   got.length = 0;
   const j = await (await post(18932, '/api/stt', { engine: 'whisper', audio: wav, prompt: 'أم زينب، ببسي' })).json();
-  assert.equal(j.text, 'شكد بعت اليوم'); assert.equal(j.engine, 'whisper');
+  assert.equal(j.text, 'شكد بعت اليوم', 'the segment Whisper marked as silence is dropped'); assert.equal(j.dropped, 1); assert.equal(j.engine, 'whisper');
   const g = got[0]; const body = g.raw.toString();
   assert.equal(g.url, '/groq/audio/transcriptions'); assert.equal(g.auth, 'Bearer gk-test'); assert.match(g.type, /multipart\/form-data/);
-  assert.match(body, /whisper-large-v3-turbo/); assert.match(body, /name="language"\r\n\r\nar/); assert.match(body, /أم زينب/); assert.match(body, /filename="speech.wav"/);
+  assert.match(body, /name="model"\r\n\r\nwhisper-large-v3\r\n/); assert.match(body, /name="temperature"\r\n\r\n0\r\n/); assert.match(body, /name="response_format"\r\n\r\nverbose_json/); assert.match(body, /name="language"\r\n\r\nar/); assert.match(body, /أم زينب/); assert.match(body, /filename="speech.wav"/);
 });
 await check('Grok STT: multipart to xAI /stt with its model', async () => {
   got.length = 0;

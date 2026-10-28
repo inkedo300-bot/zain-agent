@@ -45,7 +45,7 @@ function encodeWav(samples, rate) {
 }
 const blobToDataURL = (blob) => new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); });
 
-// Speech → text on the server's other engines: 'grok' (xAI) or 'whisper' (Whisper large-v3-turbo on Groq).
+// Speech → text on the server's other engines: 'grok' (xAI) or 'whisper' (Whisper large-v3 on Groq).
 export async function sttRemote(engine, dataUrl, prompt) {
   const r = await fetch('/api/stt', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ engine, audio: dataUrl, prompt }) });
   const j = await r.json().catch(() => ({}));

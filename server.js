@@ -4,7 +4,7 @@
 //   1) a .env file next to this file:   GEMINI_API_KEY=...   GROQ_API_KEY=... (optional)
 //   2) or the environment variable GEMINI_API_KEY
 //   3) or paste it in the app (⚙︎ الإعدادات) — sent only to this local server, per request.
-// Voice keys (optional): XAI_API_KEY (Grok voice), GROQ_API_KEY (also runs Whisper turbo). Server-side only.
+// Voice keys (optional): XAI_API_KEY (Grok voice), GROQ_API_KEY (also runs Whisper large-v3). Server-side only.
 import http from 'node:http';
 import { readFile, appendFile, mkdir } from 'node:fs/promises';
 import { readFileSync, existsSync } from 'node:fs';
@@ -28,10 +28,10 @@ const MODEL_STRONG = process.env.GEMINI_MODEL_STRONG || 'gemini-flash-latest';
 const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
 const TEXT_PROVIDER = process.env.LLM_TEXT_PROVIDER || (process.env.GROQ_API_KEY ? 'groq' : 'gemini');
 // Voice (see README «الصوت»):
-//   speech → text: Gemini (knows the shop's names) → Grok STT (xAI) → Whisper large-v3-turbo (on Groq), order set by STT_ORDER
+//   speech → text: Gemini (knows the shop's names) → Grok STT (xAI) → Whisper large-v3 (on Groq), order set by STT_ORDER
 //   text → speech: Grok TTS (xAI). There is no Iraqi locale, so the Gulf one (closest to Basra speech) is the default.
 //   Without XAI_API_KEY the browser's own Arabic voice reads the answers.
-const WHISPER_MODEL = process.env.WHISPER_MODEL || 'whisper-large-v3-turbo';
+const WHISPER_MODEL = process.env.WHISPER_MODEL || 'whisper-large-v3';
 const XAI_STT_MODEL = process.env.XAI_STT_MODEL || 'grok-voice-transcribe-2.0';
 const XAI_VOICE = process.env.XAI_VOICE || 'ara';
 const XAI_TTS_LANG = process.env.XAI_TTS_LANG || 'ar-AE';
@@ -167,7 +167,7 @@ async function sttOnce(engine, { audio, prompt }) {
   let url, key, m;
   if (engine === 'whisper') {
     url = GROQ_BASE + '/audio/transcriptions'; key = groqKey(); m = WHISPER_MODEL;
-    f.append('model', m); f.append('language', 'ar'); f.append('temperature', '0'); f.append('response_format', 'json');
+    f.append('model', m); f.append('language', 'ar'); f.append('temperature', '0'); f.append('response_format', 'verbose_json');
     // Whisper reads up to ~224 tokens of prompt: the shop's words steer spelling toward them
     if (prompt) f.append('prompt', String(prompt).slice(0, 400));
   } else if (engine === 'grok') {
@@ -181,7 +181,12 @@ async function sttOnce(engine, { audio, prompt }) {
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw Object.assign(new Error(j.error?.message || j.error || `${engine} http ${r.status}`), { status: 502 });
   count(engine + ':' + m);
-  return { text: (j.text || '').trim(), model: m };
+  // verbose_json gives per-segment confidence: drop segments Whisper itself marks as silence or as a
+  // repetition loop (high compression ratio), the usual source of made-up text on dialect audio
+  const segs = Array.isArray(j.segments) ? j.segments : null;
+  const keep = segs?.filter((x) => !(x.no_speech_prob > 0.6 && x.avg_logprob < -0.5) && !(x.compression_ratio > 2.4));
+  const text = segs ? keep.map((x) => x.text).join(' ').replace(/\s+/g, ' ').trim() : (j.text || '').trim();
+  return { text, model: m, ...(segs ? { dropped: segs.length - keep.length } : {}) };
 }
 const ttsCache = new Map();
 async function ttsOnce(text) {

@@ -60,7 +60,7 @@ function init() {
 const VKEY = 'daftar.voice';
 const VOICE = (() => { try { return { stt: 'auto', reply: 'voice', ...JSON.parse(localStorage.getItem(VKEY) || '{}') }; } catch { return { stt: 'auto', reply: 'voice' }; } })();
 const saveVoice = () => { try { localStorage.setItem(VKEY, JSON.stringify(VOICE)); } catch {} };
-const ENGINE_AR = { gemini: 'Gemini', grok: 'Grok', whisper: 'Whisper turbo', browser: 'المتصفح' };
+const ENGINE_AR = { gemini: 'Gemini', grok: 'Grok', whisper: 'Whisper large-v3', browser: 'المتصفح' };
 const describeItems = (t) => (t.items || []).map((i) => `${i.qty} ${productBySku(i.sku).name}`).join(' + ');
 // ── audit log: every write, who did it, and a 5-minute undo where undo makes sense ──
 const UNDO_MS = 5 * 60 * 1000;
@@ -1119,7 +1119,7 @@ function nbEdit(el) {
 document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.id === 'chatIn') sendChat(e.target.value); });
 
 // voice: record WAV → the first available engine transcribes it (Gemini knows the shop's names,
-// then Grok, then Whisper turbo). Without any key, the browser's own recogniser.
+// then Grok, then Whisper large-v3). Without any key, the browser's own recogniser.
 let rec = null, srRec = null, recTimer = null, levels = [];
 function sttEngines() {
   const all = (llmStatus().voice?.stt || []).filter((e) => e !== 'gemini' || useLLM());
@@ -1212,7 +1212,7 @@ function voiceSettings(st) {
   const v = st.voice || { stt: [] };
   const opt = (val, label, ok = true) => `<option value="${val}" ${VOICE.stt === val ? 'selected' : ''} ${ok ? '' : 'disabled'}>${label}${ok ? '' : ' (يحتاج مفتاح)'}</option>`;
   return `<div class="vset"><h4>${icon('mic', 15)} الصوت</h4>
-    <div class="field">تحويل الكلام لنص<select id="sttIn" class="sel">${opt('auto', 'تلقائي: ' + ((v.stt || []).map((e) => ENGINE_AR[e]).join(' ← ') || 'المتصفح'))}${opt('gemini', 'Gemini (يعرف أسماء زباينك)', v.stt.includes('gemini'))}${opt('grok', 'Grok STT (xAI)', v.stt.includes('grok'))}${opt('whisper', 'Whisper large-v3-turbo (Groq)', v.stt.includes('whisper'))}</select></div>
+    <div class="field">تحويل الكلام لنص<select id="sttIn" class="sel">${opt('auto', 'تلقائي: ' + ((v.stt || []).map((e) => ENGINE_AR[e]).join(' ← ') || 'المتصفح'))}${opt('gemini', 'Gemini (يعرف أسماء زباينك)', v.stt.includes('gemini'))}${opt('grok', 'Grok STT (xAI)', v.stt.includes('grok'))}${opt('whisper', 'Whisper large-v3 (Groq)', v.stt.includes('whisper'))}</select></div>
     <div class="field">الرد بصوت<select id="replyIn" class="sel">${[['voice', 'إذا سألت بصوت'], ['always', 'دائماً'], ['off', 'لا']].map(([k, l]) => `<option value="${k}" ${VOICE.reply === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
     <div class="pnote">${v.tts ? `الأجوبة تنقرا بصوت <b>Grok</b> (${esc(v.ttsVoice)} · ${esc(v.ttsLang)}). ماكو لهجة عراقية بـGrok، فالخليجية أقرب وحدة للبصرة.` : 'الأجوبة تنقرا بصوت المتصفح العربي. حتى تصير بصوت Grok، حط <code>XAI_API_KEY</code> بملف <code>.env</code> بالخادم (مو هنا).'}</div>
     <div class="vrow"><button class="btn sm" data-m="ttsTest">${icon('speaker', 14)} جرّب الصوت</button><button class="btn sm" data-m="cmp" ${(v.stt || []).length ? '' : 'disabled'}>${icon('mic', 14)} قارن المحركات بصوتك</button><span id="ttsMsg" class="pnote"></span></div>
