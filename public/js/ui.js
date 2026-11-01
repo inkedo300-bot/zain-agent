@@ -5,9 +5,9 @@ import { ask, parseEntry, looksLikeEntry, readNotebook, notebookToEntries, SAMPL
 import { health, llmStatus, getKey, setKey } from './llm.js';
 import { evalOffline, evalLLM, evalShops } from './eval.js';
 import { autoCheck, incomingOf, makeOrder, orderValue, STATUS_AR, OPEN, describe as describeOrder } from './orders.js';
-import { startRecording } from './voice.js';
+import { startRecording, speak, stopSpeaking, sttRemote } from './voice.js';
 import { FLOWS, LANES, flowSVG } from './flow.js';
-import { transcribe } from './agent.js';
+import { transcribe, STT_HINT, cleanTranscript, looksHallucinated } from './agent.js';
 import { agentAsk, isOpenQuestion, MAX_STEPS } from './agentloop.js';
 import { checkTransfer, messageFor, styleFor, HIGH, MEDIUM, SIGNALS } from './fraud.js';
 import { DEMO_SHOP, DEMO_CUST, prizeFor, generateTransfers } from './fraud_data.js';
@@ -29,6 +29,7 @@ const P = {
   send: '<path d="M20 12H6M12 6l-6 6 6 6"/>', back: '<path d="M9 5l7 7-7 7"/>', plus: '<path d="M12 5v14M5 12h14"/>', check: '<path d="M5 12l5 5 9-10"/>', x: '<path d="M6 6l12 12M18 6L6 18"/>',
   in: '<path d="M12 4v13M6 11l6 6 6-6"/>', out: '<path d="M12 20V7M6 13l6-6 6 6"/>', link: '<path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/>',
   info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8v.01"/>', copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 00-1-1H5a1 1 0 00-1 1v10a1 1 0 001 1h3"/>',
+  speaker: '<path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16.5 8.5a5 5 0 010 7M19 6a8.5 8.5 0 010 12"/>', stop: '<rect x="7" y="7" width="10" height="10" rx="2"/>',
   shield: '<path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
   box: '<path d="M4 8l8-4 8 4v8l-8 4-8-4z"/><path d="M4 8l8 4 8-4M12 12v8"/>',
   wallet: '<rect x="3" y="6" width="18" height="13" rx="3"/><path d="M16 12h3"/><path d="M3 9h14a2 2 0 002-2V6"/>', spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M6 18l2.5-2.5M15.5 8.5L18 6"/>',
@@ -44,7 +45,7 @@ function init() {
     useLLM: true,
     A: { tab: 'home', sub: null, custId: null, chat: [], draft: '', typing: false, sheet: null, toast: null, filter: 'all',
       scen: { collect: [], delaySupplier: false, salaryDelay: false }, closing: { step: 1, counted: '', exp: '', expNote: '', res: null }, nb: { page: null, entries: null, busy: false, img: null, err: null },
-      recording: false, transcribing: false, count: null },
+      recording: false, transcribing: false, speaking: -1, seen: 0, count: null },
     B: { mode: 'cust', cid: 'C1', sid: 'S1', sheet: null, toast: null, edit: null, deliver: null },
     orders: [], supSet: { S1: { auto: true, cap: 2000000 }, S2: { auto: false, cap: 1000000 }, S3: { auto: false, cap: 1000000 } },
     supBal: { S1: 8450000, S2: 3200000, S3: 4125000 },
@@ -55,6 +56,11 @@ function init() {
   for (const t of L.tx.filter((t) => t.type === 'credit_sale' && !t.confirmed && daysBetween(t.date, TODAY) <= 14))
     S.notes.push({ id: 'N' + t.id, cid: t.customer, kind: 'confirm', debtId: t.id, amount: t.amount, status: 'new', time: dateAr(t.date), text: describeItems(t) });
 }
+// voice preferences, remembered per browser: which speech-to-text engine, and when answers are read aloud
+const VKEY = 'daftar.voice';
+const VOICE = (() => { try { return { stt: 'auto', reply: 'voice', ...JSON.parse(localStorage.getItem(VKEY) || '{}') }; } catch { return { stt: 'auto', reply: 'voice' }; } })();
+const saveVoice = () => { try { localStorage.setItem(VKEY, JSON.stringify(VOICE)); } catch {} };
+const ENGINE_AR = { gemini: 'Gemini', grok: 'Grok', whisper: 'Whisper large-v3', browser: 'المتصفح' };
 const describeItems = (t) => (t.items || []).map((i) => `${i.qty} ${productBySku(i.sku).name}`).join(' + ');
 // ── audit log: every write, who did it, and a 5-minute undo where undo makes sense ──
 const UNDO_MS = 5 * 60 * 1000;
@@ -72,6 +78,9 @@ async function renderPill(force) {
   const on = st.ok && S.useLLM;
   $('#enginePill').className = 'pill ' + (on ? 'ok' : 'warn');
   $('#enginePill').innerHTML = `<span class="dot"></span><span>${on ? `Gemini متصل · ${esc(st.model)}` : st.ok ? 'Gemini موقوف من الإعدادات' : 'وضع احتياطي بدون نموذج'}</span>`;
+  const v = st.voice || {};
+  $('#voicePill').className = 'pill ' + (v.tts ? 'ok' : '');
+  $('#voicePill').innerHTML = `${icon('speaker', 13)}<span>يحچي: ${v.tts ? 'Grok' : 'المتصفح'} · يسمع: ${(v.stt || []).filter((e) => e !== 'gemini' || S.useLLM).map((e) => ENGINE_AR[e]).join(' ← ') || 'المتصفح'}</span>`;
   $('#modeBadge').textContent = on ? 'gemini' : 'offline';
   $('#modeBadge').className = 'src ' + (on ? 'g' : 'o');
 }
@@ -79,7 +88,7 @@ const useLLM = () => S.useLLM && llmStatus().ok;
 
 // ═════════════ PHONE A: merchant ═════════════
 function statusA(dark) { $('#sbA').className = 'statusbar' + (dark ? ' dark' : ''); $('#sbA').innerHTML = `<span>${hhmm()}</span>${sbIcons}`; }
-const appbar = (title, sub, back = true) => `<div class="appbar">${back ? `<button class="back" data-a="back">${icon('back', 16)}</button>` : ''}<b>${title}${sub ? `<small>${sub}</small>` : ''}</b></div>`;
+const appbar = (title, sub, back = true, extra = '') => `<div class="appbar">${back ? `<button class="back" data-a="back">${icon('back', 16)}</button>` : ''}<b>${title}${sub ? `<small>${sub}</small>` : ''}</b>${extra}</div>`;
 function bnav() {
   const n = L.anomalies().items.length;
   const tabs = [['home', 'الرئيسية', 'home'], ['chat', 'المساعد', 'chat'], ['book', 'الدفتر', 'book'], ['debts', 'الديون', 'users'], ['cash', 'السيولة', 'chart']];
@@ -145,18 +154,25 @@ function linkify(text, figs) {
 }
 
 function chatScreen() {
+  const seen = S.A.seen; S.A.seen = S.A.chat.length; // only new bubbles animate in
   const msgs = S.A.chat.map((m, i) => {
-    if (m.from === 'me') return `<div class="msg me">${m.voice ? `<span style="opacity:.75;font-size:11px">${icon('mic', 11)} من الصوت · </span>` : ''}${esc(m.text)}</div>`;
+    const pop = i >= seen ? ' pop' : '';
+    if (m.from === 'me') return `<div class="msg me${pop}">${m.voice ? `<span class="vtag">${icon('mic', 11)} ${m.engine ? 'سمعه ' + ENGINE_AR[m.engine] : 'من الصوت'} · </span>` : ''}${esc(m.text)}</div>`;
     if (m.entry) return entryCard(m, i);
     if (m.act) return actCard(m, i);
-    return `<div class="msg bot">${m.html || linkify(m.text, m.figs)}${m.meta ? `<div class="meta">${m.meta}</div>` : ''}</div>`;
+    const sp = S.A.speaking === i;
+    const say = m.text ? `<button class="say ${sp ? 'on' : ''}" data-a="say" data-i="${i}" title="${sp ? 'وگّف' : 'اسمع الجواب'}">${icon(sp ? 'stop' : 'speaker', 13)}${sp ? 'ديحچي…' : 'اسمع'}</button>` : '';
+    return `<div class="msg bot${pop}">${m.html || linkify(m.text, m.figs)}${m.meta || say ? `<div class="meta">${say}${m.meta || ''}</div>` : ''}</div>`;
   }).join('');
-  return `${appbar('المساعد', 'اسأل أو سجّل باللهجة، بالكتابة أو بالصوت', false)}
+  const replyBtn = `<button class="vmode ${VOICE.reply === 'off' ? '' : 'on'}" data-a="replyMode" title="متى أقرا الجواب بصوت">${icon('speaker', 15)}<span>${{ voice: 'رد صوتي: إذا حچيت', always: 'رد صوتي: دائماً', off: 'رد صوتي: مطفي' }[VOICE.reply]}</span></button>`;
+  const recBar = `<div class="recbar"><button class="cbtn rec" data-a="mic" title="خلصت، حوّله لنص">${icon('stop', 16)}</button><div class="bars" id="recBars">${'<i></i>'.repeat(28)}</div><span class="rtime" id="recTime">0:00</span><button class="btn sm" data-a="micCancel">إلغاء</button></div>`;
+  const busyBar = `<div class="recbar busy"><span class="spin"></span><span class="rlabel" id="sttLabel">ديحوّل الصوت لنص${S.A.sttEngine ? ' بـ' + ENGINE_AR[S.A.sttEngine] : ''}…</span></div>`;
+  return `${appbar('المساعد', 'اسأل أو سجّل باللهجة، بالكتابة أو بالصوت', false, replyBtn)}
   <div class="chat" id="chatBox">${msgs || `<div class="msg bot">هلا ${SHOP.owner}. اسألني عن البيع، الربح، الديون، أو السيولة. وتگدر تسجل: «بعت 3 كراتين ببسي لأبو حسين بالدين».<div class="meta"><span>الأرقام اللي تحتها خط تنضغط وتبين العمليات اللي انحسبت منها.</span></div></div>`}${S.A.typing ? '<div class="typing"><i></i><i></i><i></i></div>' : ''}</div>
   <div class="composer"><div class="sugs">${SUGGESTIONS.map((s) => `<button data-a="ask" data-q="${esc(s)}">${esc(s)}</button>`).join('')}<button data-a="ask" data-q="بعت 3 كراتين ببسي لأبو حسين بالدين">بعت 3 كراتين ببسي لأبو حسين بالدين</button></div>
     ${S.A.heard ? `<div class="heard">${icon('mic', 16)}<span>سمعتك: «<b>${esc(S.A.heard.text)}</b>». صح؟</span><button class="btn sm primary" data-a="heardOk">صح، أرسل</button><button class="btn sm" data-a="heardEdit">أصحّح</button></div>` : ''}
-    <div class="line"><button class="cbtn ${S.A.recording ? 'rec' : ''}" data-a="mic" title="${S.A.recording ? 'اضغط حتى توقف' : 'تكلم'}" ${S.A.transcribing ? 'disabled' : ''}>${S.A.transcribing ? '<span class="spin"></span>' : icon('mic', 18)}</button><button class="cbtn" data-a="sub" data-k="notebook" title="صورة دفتر">${icon('camera', 18)}</button>
-    <input id="chatIn" placeholder="اكتب سؤالك أو القيد…" value="${esc(S.A.draft)}" autocomplete="off"><button class="cbtn send" data-a="send">${icon('send', 18)}</button></div></div>`;
+    ${S.A.recording ? recBar : S.A.transcribing ? busyBar : `<div class="line"><button class="cbtn mic" data-a="mic" title="تكلم">${icon('mic', 18)}</button><button class="cbtn" data-a="sub" data-k="notebook" title="صورة دفتر">${icon('camera', 18)}</button>
+    <input id="chatIn" placeholder="اكتب سؤالك أو القيد…" value="${esc(S.A.draft)}" autocomplete="off"><button class="cbtn send" data-a="send">${icon('send', 18)}</button></div>`}</div>`;
 }
 function entryCard(m, i) {
   const e = m.entry;
@@ -812,7 +828,8 @@ function actCard(m, i) {
 
 async function sendChat(text, opts = {}) {
   text = (text || '').trim(); if (!text) return;
-  const A = S.A; A.draft = ''; A.chat.push({ from: 'me', text, voice: opts.voice }); A.typing = true; renderA();
+  const A = S.A; A.draft = ''; stopSpeaking(); A.speaking = -1; A.chat.push({ from: 'me', text, voice: opts.voice, engine: opts.engine }); A.typing = true; renderA();
+  const from = A.chat.length;
   if (looksLikeEntry(text) && !detectAction(text)) {
     const e = await parseEntry(text, { useLLM: useLLM() });
     A.typing = false; A.chat.push({ from: 'bot', entry: e });
@@ -841,6 +858,25 @@ async function sendChat(text, opts = {}) {
     }
   }
   renderA(); renderPanel();
+  // hands-free: a question asked by voice gets its answer read back (or every answer, if the owner chose that)
+  if (VOICE.reply === 'always' || (VOICE.reply === 'voice' && opts.voice)) {
+    const said = A.chat.slice(from).map((m, j) => [m, from + j]).filter(([m]) => m.from === 'bot' && m.text && !m.entry && !m.act);
+    if (said.length) sayMsgs(said.map(([, i]) => i));
+  }
+}
+// read answers aloud: Grok voice if the server has an xAI key, else the browser's Arabic voice
+async function sayMsgs(idx) {
+  const A = S.A;
+  for (const i of idx) {
+    const m = A.chat[i]; if (!m) continue;
+    A.speaking = i; renderA();
+    const ended = new Promise((res) => {
+      speak(m.text, { engine: llmStatus().voice?.tts, onEnd: res }).then((h) => { if (!h) res(); else if (i === A.speaking) event(`قرا الجواب بصوت ${ENGINE_AR[h.engine]}.`); });
+    });
+    await ended;
+    if (A.speaking !== i) return; // stopped or replaced
+  }
+  A.speaking = -1; renderA();
 }
 function entryFromCard(i) {
   const m = S.A.chat[i]; const e = m.entry; const card = document.querySelector(`.entry[data-i="${i}"]`);
@@ -892,7 +928,10 @@ document.addEventListener('click', async (ev) => {
       case 'closeSheet': if (ev.target === a || a.tagName === 'BUTTON') { A.sheet = null; renderA(); } break;
       case 'filter': A.filter = a.dataset.k; renderA(); break;
       case 'ask': A.tab = 'chat'; A.sub = null; sendChat(a.dataset.q); break;
-      case 'send': { const v = document.getElementById('chatIn')?.value; const wasHeard = !!A.heard; A.heard = null; sendChat(v, { voice: wasHeard }); break; }
+      case 'send': { const v = document.getElementById('chatIn')?.value; const h = A.heard; A.heard = null; sendChat(v, { voice: !!h, engine: h?.engine }); break; }
+      case 'say': { const i = +a.dataset.i; if (A.speaking === i) { stopSpeaking(); A.speaking = -1; renderA(); } else sayMsgs([i]); break; }
+      case 'replyMode': { VOICE.reply = { voice: 'always', always: 'off', off: 'voice' }[VOICE.reply]; saveVoice(); if (VOICE.reply === 'off') { stopSpeaking(); A.speaking = -1; } renderA(); break; }
+      case 'micCancel': cancelMic(); break;
       case 'showTrace': S.tab = 'trace'; renderPanel(); document.querySelector('.panelcol')?.scrollIntoView({ behavior: 'smooth' }); break;
       case 'saveEntry': { const i = +a.dataset.i; const e = entryFromCard(i); e.missing = []; if (!validEntry(e)) { toastA('القيد ناقص', 'كمّل النوع والزبون والمبلغ'); break; } saveEntry(e); S.A.chat[i].saved = true; renderA(); break; }
       case 'cancelEntry': S.A.chat[+a.dataset.i].cancelled = true; renderA(); break;
@@ -960,7 +999,7 @@ document.addEventListener('click', async (ev) => {
         toastA(n ? `انحفظت ${n} سطور` : 'ماكو سطور مأكدة', n ? 'ووصل للزبائن طلب تأكيد' : 'صحح الحقول الحمر أول'); break;
       }
       case 'mic': startMic(); break;
-      case 'heardOk': { const t = ($('#chatIn')?.value || A.heard?.text || '').trim(); A.heard = null; sendChat(t, { voice: true }); break; }
+      case 'heardOk': { const t = ($('#chatIn')?.value || A.heard?.text || '').trim(); const eng = A.heard?.engine; A.heard = null; sendChat(t, { voice: true, engine: eng }); break; }
       case 'heardEdit': A.heard = null; renderA(); setTimeout(() => $('#chatIn')?.focus(), 30); break;
       case 'actRem': { const m = A.chat[+a.dataset.i]; m.act.done = true; renderA(); await startAction({ tool: 'remind', args: { name: customerById(a.dataset.id).name } }, 'button'); break; }
       case 'actOrd': { const m = A.chat[+a.dataset.i]; m.act.done = true; renderA(); await startAction({ tool: 'order', args: { supplier: a.dataset.id } }, 'button'); break; }
@@ -1079,37 +1118,61 @@ function nbEdit(el) {
 }
 document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.id === 'chatIn') sendChat(e.target.value); });
 
-// voice: record WAV → Gemini transcribes with the shop's vocabulary (names, products).
-// Without Gemini, fall back to the browser recogniser.
-let rec = null;
+// voice: record WAV → the first available engine transcribes it (Whisper large-v3 on Groq,
+// then Gemini, which knows the shop's names, then Grok). Without any key, the browser's own recogniser.
+let rec = null, srRec = null, recTimer = null, levels = [];
+function sttEngines() {
+  const all = (llmStatus().voice?.stt || []).filter((e) => e !== 'gemini' || useLLM());
+  if (VOICE.stt !== 'auto' && all.includes(VOICE.stt)) return [VOICE.stt, ...all.filter((e) => e !== VOICE.stt)];
+  return all;
+}
+function drawLevel(v) {
+  levels.push(Math.min(1, v * 2.2)); if (levels.length > 28) levels.shift();
+  const bars = document.querySelectorAll('#recBars i');
+  bars.forEach((b, i) => { const x = levels[levels.length - bars.length + i] ?? 0; b.style.transform = `scaleY(${0.12 + x * 0.88})`; });
+}
+function recStarted() {
+  const t0 = Date.now(); levels = [];
+  clearInterval(recTimer);
+  recTimer = setInterval(() => { const s = Math.floor((Date.now() - t0) / 1000); const el = document.getElementById('recTime'); if (el) el.textContent = `0:${String(s).padStart(2, '0')}`; }, 250);
+}
 async function startMic() {
   const A = S.A;
-  if (rec) { const r = rec; rec = null; A.recording = false; A.transcribing = true; renderA(); const { dataUrl, seconds } = await r.stop(); return afterRecording(dataUrl, seconds); }
-  if (!useLLM()) return browserMic();
-  try { rec = await startRecording({ maxMs: 15000 }); A.recording = true; renderA(); toastA('ديسجل… تكلم', 'اضغط المايك مرة ثانية لما تخلص', { icon: 'mic' });
-    rec.finished.then((res) => { if (rec) { rec = null; A.recording = false; A.transcribing = true; renderA(); afterRecording(res.dataUrl, res.seconds); } });
+  stopSpeaking(); A.speaking = -1;
+  if (srRec) { srRec.stop(); return; }
+  if (rec) { const r = rec; rec = null; clearInterval(recTimer); A.recording = false; A.transcribing = true; renderA(); const { dataUrl, seconds } = await r.stop(); return afterRecording(dataUrl, seconds); }
+  if (!sttEngines().length) return browserMic();
+  try { rec = await startRecording({ maxMs: 15000, onLevel: drawLevel }); A.recording = true; A.tab = 'chat'; A.sub = null; renderA(); recStarted();
+    rec.finished.then((res) => { if (rec) { rec = null; clearInterval(recTimer); A.recording = false; A.transcribing = true; renderA(); afterRecording(res.dataUrl, res.seconds); } });
   } catch { toastA('ما گدرت أفتح المايكروفون', 'تأكد من إذن المتصفح'); }
+}
+async function cancelMic() {
+  clearInterval(recTimer);
+  if (rec) { const r = rec; rec = null; await r.stop().catch(() => {}); }
+  if (srRec) { const r = srRec; srRec = null; r.onresult = null; r.abort(); }
+  S.A.recording = false; S.A.transcribing = false; renderA();
 }
 async function afterRecording(dataUrl, seconds) {
   const A = S.A;
   if (seconds < 0.6) { A.transcribing = false; renderA(); toastA('التسجيل قصير', 'اضغط وتكلم، وبعدين اضغط مرة ثانية'); return; }
   try {
-    const { text, ms } = await transcribe(dataUrl);
-    A.transcribing = false;
+    const { text, ms, engine } = await transcribe(dataUrl, { engines: sttEngines(), onTry: (e) => { A.sttEngine = e; const l = document.getElementById('sttLabel'); if (l) l.textContent = `ديحوّل الصوت لنص بـ${ENGINE_AR[e]}…`; } });
+    A.transcribing = false; A.sttEngine = null;
     if (!text) { renderA(); toastA('ما سمعت كلام واضح', 'حاول مرة ثانية بمكان أهدأ'); return; }
-    event(`تحويل الصوت لنص بـGemini (${(ms / 1000).toFixed(1)} ث): «${text}»`);
+    event(`تحويل الصوت لنص بـ${ENGINE_AR[engine]} (${(ms / 1000).toFixed(1)} ث): «${text}»`);
     // «سمعتك: … صح؟» — nothing is sent or saved until the owner confirms what was heard
-    A.tab = 'chat'; A.sub = null; A.heard = { text, ms }; A.draft = text; renderA(); setTimeout(() => $('#chatIn')?.focus(), 30);
-  } catch (e) { A.transcribing = false; renderA(); toastA('ما گدرت أحول الصوت لنص', 'جرّب مرة ثانية أو اكتب'); }
+    A.tab = 'chat'; A.sub = null; A.heard = { text, ms, engine }; A.draft = text; renderA(); setTimeout(() => $('#chatIn')?.focus(), 30);
+  } catch (e) { A.transcribing = false; A.sttEngine = null; renderA(); toastA('ما گدرت أحول الصوت لنص', 'جرّب مرة ثانية أو اكتب'); }
 }
 function browserMic() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) { toastA('المتصفح ما يدعم الصوت', 'جرّب Chrome، أو فعّل Gemini'); return; }
-  const r = new SR(); r.lang = 'ar-IQ'; r.interimResults = false; r.maxAlternatives = 1;
-  S.A.recording = true; renderA();
-  r.onresult = (e) => { const t = e.results[0][0].transcript; S.A.recording = false; sendChat(t, { voice: true }); };
-  r.onerror = () => { S.A.recording = false; toastA('ما سمعت زين', 'حاول مرة ثانية'); };
-  r.onend = () => { if (S.A.recording) { S.A.recording = false; renderA(); } };
+  if (!SR) { toastA('المتصفح ما يدعم الصوت', 'جرّب Chrome، أو حط مفتاح Gemini أو Groq أو xAI'); return; }
+  const r = new SR(); r.lang = 'ar-IQ'; r.interimResults = false; r.maxAlternatives = 1; srRec = r;
+  S.A.recording = true; S.A.tab = 'chat'; S.A.sub = null; renderA(); recStarted();
+  const end = () => { srRec = null; clearInterval(recTimer); if (S.A.recording) { S.A.recording = false; renderA(); } };
+  r.onresult = (e) => { const t = e.results[0][0].transcript; end(); sendChat(t, { voice: true, engine: 'browser' }); };
+  r.onerror = () => { end(); toastA('ما سمعت زين', 'حاول مرة ثانية'); };
+  r.onend = end;
   r.start();
 }
 
@@ -1120,11 +1183,18 @@ $('#settingsBtn').addEventListener('click', () => {
     <div class="mb"><div class="field">مفتاح Gemini API${st.keySource === 'server' ? ' (موجود بالخادم، ما تحتاج تحطه هنا)' : ''}<input id="keyIn" type="password" placeholder="AIza…" value="${esc(getKey())}" style="direction:ltr"></div>
       <div class="pnote">المفتاح ينحفظ بمتصفحك بس، وينرسل لخادمك المحلي حتى يوصله لـGemini. الأفضل تحطه بملف <code>.env</code> جنب <code>server.js</code>.</div>
       <label style="display:flex;gap:8px;align-items:center;font-size:13px"><input type="checkbox" id="useIn" ${S.useLLM ? 'checked' : ''}> استخدم Gemini (إذا ألغيته يشتغل كلشي بالوضع الاحتياطي)</label>
-      <div id="keyMsg" class="pnote"></div></div>
+      <div id="keyMsg" class="pnote"></div>
+      ${voiceSettings(st)}</div>
     <div class="mf"><button class="btn primary" data-m="save">احفظ وجرّب</button><button class="btn" data-m="close">إلغاء</button></div></div></div>`;
+});
+$('#modalRoot').addEventListener('change', (e) => {
+  if (e.target.id === 'sttIn') { VOICE.stt = e.target.value; saveVoice(); }
+  if (e.target.id === 'replyIn') { VOICE.reply = e.target.value; saveVoice(); renderA(); }
 });
 $('#modalRoot').addEventListener('click', async (e) => {
   const m = e.target.closest('[data-m]'); if (!m) return;
+  if (m.dataset.m === 'cmp') return compareEngines();
+  if (m.dataset.m === 'ttsTest') { const v = llmStatus().voice || {}; const h = await speak('هلا أبو مصطفى. اليوم بعت بمليون وأربعمية ألف دينار، وأم زينب بعدها مطلوبة إلك خمسة وعشرين ألف.', { engine: v.tts }); $('#ttsMsg').textContent = h ? `ديحچي بصوت ${ENGINE_AR[h.engine]}${h.engine === 'grok' ? ` (${v.ttsVoice} · ${v.ttsLang})` : ''}` : 'ماكو صوت عربي بهالمتصفح'; return; }
   if (m.dataset.m === 'close' && (e.target === m || m.tagName === 'BUTTON')) { $('#modalRoot').innerHTML = ''; S.flow.zoom = false; return; }
   if (m.dataset.m === 'save') {
     setKey($('#keyIn').value); S.useLLM = $('#useIn').checked;
@@ -1137,6 +1207,38 @@ $('#modalRoot').addEventListener('click', async (e) => {
     renderPill();
   }
 });
+// voice section of Settings: engine choice, reply mode, and a side-by-side test on the owner's own voice
+function voiceSettings(st) {
+  const v = st.voice || { stt: [] };
+  const opt = (val, label, ok = true) => `<option value="${val}" ${VOICE.stt === val ? 'selected' : ''} ${ok ? '' : 'disabled'}>${label}${ok ? '' : ' (يحتاج مفتاح)'}</option>`;
+  return `<div class="vset"><h4>${icon('mic', 15)} الصوت</h4>
+    <div class="field">تحويل الكلام لنص<select id="sttIn" class="sel">${opt('auto', 'تلقائي: ' + ((v.stt || []).map((e) => ENGINE_AR[e]).join(' ← ') || 'المتصفح'))}${opt('gemini', 'Gemini (يعرف أسماء زباينك)', v.stt.includes('gemini'))}${opt('grok', 'Grok STT (xAI)', v.stt.includes('grok'))}${opt('whisper', 'Whisper large-v3 (Groq)', v.stt.includes('whisper'))}</select></div>
+    <div class="field">الرد بصوت<select id="replyIn" class="sel">${[['voice', 'إذا سألت بصوت'], ['always', 'دائماً'], ['off', 'لا']].map(([k, l]) => `<option value="${k}" ${VOICE.reply === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    <div class="pnote">${v.tts ? `الأجوبة تنقرا بصوت <b>Grok</b> (${esc(v.ttsVoice)} · ${esc(v.ttsLang)}). ماكو لهجة عراقية بـGrok، فالخليجية أقرب وحدة للبصرة.` : 'الأجوبة تنقرا بصوت المتصفح العربي. حتى تصير بصوت Grok، حط <code>XAI_API_KEY</code> بملف <code>.env</code> بالخادم (مو هنا).'}</div>
+    <div class="vrow"><button class="btn sm" data-m="ttsTest">${icon('speaker', 14)} جرّب الصوت</button><button class="btn sm" data-m="cmp" ${(v.stt || []).length ? '' : 'disabled'}>${icon('mic', 14)} قارن المحركات بصوتك</button><span id="ttsMsg" class="pnote"></span></div>
+    <div id="cmpOut"></div></div>`;
+}
+// record once, send the same clip to every engine that has a key, show text and time side by side
+async function compareEngines() {
+  const out = $('#cmpOut'); const eng = llmStatus().voice?.stt || [];
+  if (!eng.length) return;
+  let r;
+  try { r = await startRecording({ maxMs: 6000 }); } catch { out.innerHTML = '<div class="pnote">ما گدرت أفتح المايكروفون.</div>'; return; }
+  out.innerHTML = `<div class="pnote"><span class="dotrec"></span> تكلم هسه (6 ثواني)… مثلاً: «شكد بعت اليوم؟ وذكّر أم زينب»</div>`;
+  const { dataUrl, seconds } = await r.finished;
+  out.innerHTML = `<table class="cmp"><tr><th>المحرك</th><th>شنو سمع</th><th>الوقت</th></tr>${eng.map((e) => `<tr id="cmp-${e}"><td>${ENGINE_AR[e]}</td><td><span class="spin"></span></td><td></td></tr>`).join('')}</table>`;
+  if (seconds < 0.6) { out.innerHTML = '<div class="pnote">التسجيل قصير.</div>'; return; }
+  await Promise.all(eng.map(async (e) => {
+    const row = document.getElementById('cmp-' + e); const t0 = performance.now();
+    try {
+      const res = e === 'gemini' ? await transcribe(dataUrl, { engines: ['gemini'] }) : await sttRemote(e, dataUrl, STT_HINT);
+      const text = cleanTranscript(res.text); const bad = e !== 'gemini' && looksHallucinated(text);
+      row.children[1].innerHTML = text ? `${esc(text)}${bad ? ' <span class="tag late">مشكوك (تكرار/هلوسة)</span>' : ''}` : '<span class="muted">ما سمع شي</span>';
+    } catch (err) { row.children[1].innerHTML = `<span class="neg">${esc(err.message || err)}</span>`; }
+    row.children[2].textContent = ((performance.now() - t0) / 1000).toFixed(1) + ' ث';
+  }));
+  event(`مقارنة محركات الصوت على نفس التسجيل: ${eng.map((e) => ENGINE_AR[e]).join('، ')}.`);
+}
 $('#custSel').addEventListener('change', () => {});
 $('#resetBtn').addEventListener('click', () => { flowStop(); init(); boot(); });
 $('#flowBtn').addEventListener('click', () => { S.tab = 'flow'; renderPanel(); document.querySelector('.panelcol')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); });

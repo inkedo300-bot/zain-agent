@@ -8,6 +8,7 @@
 import { Ledger, period } from './ledger.js';
 import { routeOffline, parseEntryOffline, looksLikeEntry, detectAction, stripVocative } from './nlu.js';
 import { callLLM, extractJSON, llmStatus } from './llm.js';
+import { sttRemote } from './voice.js';
 import { mask, unmask, nameOfCode, CUSTOMER_CODES } from './privacy.js';
 import { CUSTOMERS, PRODUCTS, SUPPLIERS, productBySku, customerById, fmt, dateAr, TODAY, SHOP, daysBetween, addDays, dom } from './data.js';
 
@@ -291,16 +292,40 @@ const STT_ASK = 'فرّغ الكلام اللي بالتسجيل الصوتي ا
 // deterministic touch-ups for near-misses the model sometimes makes
 const STT_FIX = [[/محزن/g, "مخزن"], [/هال(أسماء|اسماء|سمك|اسبوغ)/g, "هالأسبوع"], [/محزون/g, 'مخزون'], [/\s*(هذا التسجيل|التسجيل الصوتي)\.?$/u, ''], [/[.،]+$/u, '']];
 export function cleanTranscript(t) { let s = (t || '').trim(); for (const [re, to] of STT_FIX) s = s.replace(re, to); return s.trim(); }
-export async function transcribe(dataUrl) {
-  let ms = 0, out = '';
-  for (const tier of ['media', 'strong']) { // Flash-Lite first (500/day free); an empty result gets one try on Flash
-    const r = await callLLM({ system: STT, messages: [{ role: 'user', content: STT_ASK }], images: [dataUrl], json: true, maxTokens: 200, timeoutMs: 30000, tier });
-    ms += r.ms || 0;
-    out = cleanTranscript(extractJSON(r.text)?.text);
-    if (out) break;
+// short vocabulary hint for Whisper / Grok (they take a plain prompt, not instructions)
+export const STT_HINT = `بقالة بالبصرة. ${CUSTOMERS.map((c) => c.name).join('، ')}. ${PRODUCTS.map((p) => p.name).join('، ')}. شكد ربحت، منو مطلوب إلي، ذكّر، اطلب من الرافدين، بالدين، الكاش، المحفظة.`;
+// Whisper sometimes "hallucinates" on short or noisy Arabic clips: it repeats a phrase or
+// adds a stock line (subscribe / translation credits). Such output is rejected and the next engine tries.
+export function looksHallucinated(t) {
+  if (!t) return false;
+  if (/(اشترك|الاشتراك في القناة|ترجمة|نانسي|شكرا للمشاهدة|subscribe)/i.test(t)) return true;
+  const w = t.split(/\s+/); if (w.length >= 8 && new Set(w).size / w.length < 0.35) return true;
+  return t.length > 300;
+}
+export async function transcribe(dataUrl, { engines = ['gemini'], onTry } = {}) {
+  let ms = 0, out = '', used = null, lastErr;
+  for (const eng of engines) {
+    onTry?.(eng);
+    try {
+      if (eng === 'gemini') {
+        for (const tier of ['media', 'strong']) { // Flash-Lite first (500/day free); an empty result gets one try on Flash
+          const r = await callLLM({ system: STT, messages: [{ role: 'user', content: STT_ASK }], images: [dataUrl], json: true, maxTokens: 200, timeoutMs: 30000, tier });
+          ms += r.ms || 0;
+          out = cleanTranscript(extractJSON(r.text)?.text);
+          if (out) break;
+        }
+      } else {
+        const r = await sttRemote(eng, dataUrl, STT_HINT);
+        ms += r.ms || 0;
+        out = cleanTranscript(r.text);
+        if (looksHallucinated(out)) out = '';
+      }
+    } catch (e) { lastErr = e; out = ''; }
+    if (out) { used = eng; break; }
   }
+  if (!out && lastErr) throw lastErr;
   if (out.length > 300) throw new Error('نص طويل');
-  return { text: out, ms };
+  return { text: out, ms, engine: used };
 }
 
 // ── reading a photographed notebook page ──

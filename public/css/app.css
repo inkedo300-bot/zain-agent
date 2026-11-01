@@ -348,3 +348,49 @@ td.n { direction: ltr; text-align: right; font-feature-settings: 'tnum'; white-s
 .xack { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; background: var(--warn-50); color: #6d4200; border-radius: 12px; padding: 9px 11px; }
 .pinbox { width: 100%; text-align: center; letter-spacing: 12px; font-size: 24px; border: 1.5px solid var(--line-2); border-radius: 12px; padding: 10px; margin: 6px 0 0; }
 .xscore { font-size: 11px; text-align: center; }
+
+/* ── polish + voice ── */
+.brandmark .logo { background: linear-gradient(145deg, var(--accent) -20%, var(--brand) 55%, var(--brand-800) 120%); box-shadow: 0 6px 14px -6px rgba(91,42,134,.6); }
+.topbar { backdrop-filter: saturate(1.4) blur(8px); background: rgba(255,255,255,.88); }
+.btn, .chip, .cbtn, .sugs button, .tile, .bnav button { transition: background-color .15s, border-color .15s, color .15s, transform .12s; }
+.btn:active, .cbtn:active, .chip:active, .sugs button:active { transform: scale(.96); }
+:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 8px; }
+.sugs button:hover { border-color: var(--brand); color: var(--brand); background: var(--brand-50); }
+.msg.me { background: linear-gradient(160deg, #6b35a0, var(--brand) 60%); box-shadow: 0 4px 12px -8px rgba(91,42,134,.8); }
+.msg.bot { box-shadow: 0 2px 8px -6px rgba(45,18,69,.25); }
+.msg.pop, .entry.pop { animation: pop .28s cubic-bezier(.2,.9,.3,1.2) both; }
+@keyframes pop { from { opacity: 0; transform: translateY(8px) scale(.97); } }
+.msg .vtag { opacity: .78; font-size: 11px; }
+.modal { max-height: 92vh; overflow-y: auto; }
+.modal-bg { animation: fade .15s ease-out; } .modal { animation: up .2s ease-out; }
+@keyframes fade { from { opacity: 0; } }
+
+/* speak an answer */
+.msg .meta button.say { display: inline-flex; align-items: center; gap: 3px; text-decoration: none; background: var(--brand-50); border-radius: 999px; padding: 1px 8px 1px 7px; color: var(--brand-800); }
+.msg .meta button.say:hover { background: var(--brand-100); }
+.msg .meta button.say.on { background: var(--brand); color: #fff; animation: glow 1.4s ease-in-out infinite; }
+@keyframes glow { 50% { box-shadow: 0 0 0 4px rgba(91,42,134,.18); } }
+.appbar .vmode { border: 1px solid var(--line); background: var(--surface-2); color: var(--muted); border-radius: 999px; padding: 4px 9px 4px 8px; font-size: 10.5px; display: inline-flex; gap: 4px; align-items: center; max-width: 150px; }
+.appbar .vmode span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.appbar .vmode.on { color: var(--brand); border-color: var(--brand-100); background: var(--brand-50); }
+
+/* recording bar: live level meter + timer */
+.cbtn.mic { color: var(--brand); border-color: var(--brand-100); background: var(--brand-50); }
+.recbar { display: flex; align-items: center; gap: 8px; background: var(--danger-50); border: 1px solid #f3c5cc; border-radius: 999px; padding: 4px 6px 4px 10px; animation: pop .2s ease-out; }
+.recbar.busy { background: var(--brand-50); border-color: var(--brand-100); padding: 10px 14px; color: var(--brand-800); font-size: 12.5px; }
+.recbar .bars { flex: 1; height: 26px; display: flex; align-items: center; gap: 2px; direction: ltr; }
+.recbar .bars i { flex: 1; height: 100%; background: var(--danger); border-radius: 2px; transform: scaleY(.12); transition: transform .08s linear; opacity: .85; }
+.recbar .rtime { font-family: var(--mono); font-size: 12px; color: var(--danger); min-width: 32px; }
+.recbar .cbtn.rec { width: 34px; height: 34px; }
+.dotrec { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); animation: blink 1s infinite; margin-inline-end: 4px; }
+
+/* voice settings */
+.vset { border-top: 1px solid var(--line); padding-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+.vset h4 { margin: 0; font-size: 13.5px; display: flex; gap: 6px; align-items: center; color: var(--brand-800); }
+.vset .vrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+table.cmp { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.cmp th { text-align: start; color: var(--muted); font-weight: 500; font-size: 11.5px; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+table.cmp td { padding: 7px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.cmp td:first-child { white-space: nowrap; font-weight: 600; } table.cmp td:last-child { white-space: nowrap; font-family: var(--mono); color: var(--muted); }
+
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
