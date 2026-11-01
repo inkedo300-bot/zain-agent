@@ -4,6 +4,7 @@
 > The model never computes a number, never sees a customer's name, and every write goes through an approval card (money needs a PIN) and an audit log with undo.
 > Every outgoing transfer passes a **transfer safety check**: 22 weighted signals about the recipient and the session (reports, brand-new account, cash-out within minutes, «ZainCash support» in the name, an active phone call, a recent OTP request…). Above 30 → light warning, above 60 → full awareness screen. Rules decide, not the model; the sender's age is never a signal (it only simplifies the wording, and a test proves the decision never changes).
 > **Voice:** speech-to-text tries Gemini (prompted with the shop's names) → Grok STT (xAI) → Whisper large-v3 (Groq, verbose_json, low-confidence segments dropped); answers are read aloud with Grok TTS (Gulf Arabic locale, closest to Basra; no Iraqi locale exists), or the browser's Arabic voice without a key. Settings has a side-by-side engine comparison on your own voice. Keys live only in the server's `.env`.
+> **Iraqi dialect word bank** (`public/js/lexicon.js`, written by hand for this project): 208 entries / ~1,000 spoken forms (question words, time, money and dollar slang, debts, wallet, stock, generator «امبيرات», rent «كري», Iraqi numbers like «خمسطعش» and «عشرت تالاف»). It normalises dialect for the offline rules, goes into the Gemini/Groq prompts as a glossary, and biases speech-to-text. Offline rules on heavy dialect: 6/31 → 31/31 questions on the dev set, 4/12 → 10/12 on a fresh blind set.
 > Run: `node server.js` (Node 18+, no dependencies) → http://localhost:8080 · `npm test` · `npm run eval`. All data is synthetic.
 
 # Zain Agent · دفتر — حسابات المحل داخل المحفظة
@@ -59,6 +60,20 @@ npm test                       # 3 ملفات اختبار بنموذج وهمي
 node eval/run_eval_gemini.mjs  # التقييم ويا النموذج (يحتاج الخادم شغّال ومفتاح)
 node eval/run_agent_eval.mjs   # الوكيل على الأسئلة المفتوحة ويا النموذج
 ```
+
+---
+
+## بنك كلمات اللهجة العراقية
+
+`public/js/lexicon.js` بيه **208 مدخل وحوالي 1000 صيغة** مثل ما ينحچون بالمحل: كلمات السؤال («جم»، «شكثر»، «بيش»)، الوقت («هسع»، «باچر»، «هالجمعة»، «الشهر الياي»)، الفلوس والدولار («الأخضر»، «البورصة»، «ورقة»، «خردة»)، الدين والسداد («عالدفتر»، «خليها عليه»، «صفّى حسابه»، «نطاني»)، المصاريف («الكري»، «الأمبيرات»، «يومية الصانع»)، المخزن («الستوك»، «ضايل»، «خلصان»)، كلمات الاحتيال («قفّاص»، «دزلي الكود»)، و97 كلمة أرقام («ثنعش»، «خمسطعش»، «ثلثين»، «عشرت تالاف»، «الف ونص»). وإذا گال «انطاني خمسة وعشرين» يفهمها 25,000 ويطلب تأكيد.
+
+ينستخدم بثلاث أماكن:
+1. **الوضع الاحتياطي (بدون مفتاح):** `normalizeIraqi()` يحوّل الكلمة للصيغة اللي القواعد تعرفها قبل الفهم («جم بعت هسع بالأمبيرات؟» ← «شكد بعت هسه بالمولده؟»). أسماء الزباين ما تتغير.
+2. **برومبت Gemini/Groq:** معجم مختصر (حوالي 1500 توكن) ينضاف لموجّه الأسئلة واستخراج القيود، ونسخة أصغر للوكيل.
+3. **تفريغ الصوت:** قائمة كلمات لهجة يكتبها مثل ما تنگال بدل ما يحولها للفصحى (`sttHints()`).
+
+النتيجة بالقواعد بدون نموذج: أسئلة لهجة ثقيلة من 6/31 إلى 31/31، وقيود من 3/12 إلى 12/12 (`npm run eval:dialect`). هذي المجموعة انكتبت ويا المعجم، فاختبرناه على 12 سؤال جديد ما انضبط عليهم: من 4/12 إلى 10/12.
+تضيف كلمة؟ زيد سطر بالقسم المناسب: `['الصيغة|صيغة ثانية', 'المعنى', 'الكلمة اللي القواعد تعرفها']`، و`npm test` يتأكد ماكو كلمة تتعارض ويا ثانية أو ويا اسم مادة.
 
 ---
 

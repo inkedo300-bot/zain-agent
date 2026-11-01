@@ -10,6 +10,7 @@ import { routeOffline, parseEntryOffline, looksLikeEntry, detectAction, stripVoc
 import { callLLM, extractJSON, llmStatus } from './llm.js';
 import { sttRemote } from './voice.js';
 import { mask, unmask, nameOfCode, CUSTOMER_CODES } from './privacy.js';
+import { dialectGlossary, sttHints } from './lexicon.js';
 import { CUSTOMERS, PRODUCTS, SUPPLIERS, productBySku, customerById, fmt, dateAr, TODAY, SHOP, daysBetween, addDays, dom } from './data.js';
 
 export const ACTIONS = ['remind', 'order'];
@@ -34,6 +35,7 @@ const ROUTER = `أنت موجّه أسئلة داخل تطبيق دفتر حسا
 - remind {name: رمز الزبون|null} : ذكّر زبون بدينه وأرسله رابط دفع (مثل «ذكّر C2»، «دزله رابط دفع»)
 - order {supplier: S1|S2|S3|null} : سوّي طلبية لمورد. الموردين: ${Object.values(SUPPLIERS).map((x) => `${x.id}=${x.short}`).join('، ')}
 الكلام ممكن يبدأ بنداء مثل «علي» أو «حبيبي»، تجاهله.
+${dialectGlossary()}
 period واحد من: ${PERIODS.join(', ')}. إذا period=month فـ arg رقم الشهر (1-12). اليوم ${TODAY}. البيانات موجودة بس لآخر 90 يوم.
 إذا السؤال عن زبون أو مادة مو موجودة بالقوائم، أو عن فترة قبل 90 يوم، أو ما إله علاقة بالمحل: أرجع {"refuse":true,"reason":"unknown_customer|unknown_product|out_of_range|offtopic"}.
 أرجع JSON فقط: {"tool":"...","args":{...}}`;
@@ -257,7 +259,9 @@ export async function ask(L, q, { useLLM = true } = {}) {
 const ENTRY = `استخرج قيد من كلام صاحب بقالة عراقية. أرجع JSON فقط:
 {"type":"sale|credit_sale|payment_in|expense|purchase","customer":"<رمز الزبون أو null>","items":[{"sku":"<sku>","qty":<عدد>}],"amount":<رقم فقط إذا مذكور صراحة بالكلام وإلا null>,"channel":"cash|wallet|credit","category":"rent|gen|wage|other|null"}
 الزبائن مخفية أسماؤهم برموز (${CUSTOMER_CODES.join('، ')})؛ حط الرمز بـ customer. المواد: ${PRODUCTS.map((p) => `${p.sku}=${p.name}`).join('، ')}.
-لا تخترع سعر: الأسعار تنحسب من قائمة المحل. إذا شي مو واضح خليه null.`;
+لا تخترع سعر: الأسعار تنحسب من قائمة المحل. إذا شي مو واضح خليه null.
+العراقيين يحذفون «الف»: «انطاني خمسة وعشرين» يعني 25000.
+${dialectGlossary()}`;
 export async function parseEntry(text, { useLLM = true } = {}) {
   const off = parseEntryOffline(text);
   if (!(useLLM && llmStatus().ok)) return { ...off, source: 'offline' };
@@ -285,6 +289,7 @@ export { looksLikeEntry };
 const STT = `إنت تفريغ صوتي (speech-to-text) فقط. حوّل الكلام المسموع بالتسجيل لنص عربي حرفياً مثل ما انگال، باللهجة العراقية. المتكلم صاحب بقالة بالبصرة يسأل مساعده أو يسجل قيد.
 كلمات تتكرر عنده: ذكّر، رابط دفع، طلبية، اطلب، شكد، شگد، ربحت، الغلة، مطلوب إلي، منو، بالدين، سدد، سجل، المخزن، المخزون، باقي، خلص، قرب يخلص، الكاش، المحفظة، اليوم، البارحة، هالأسبوع، الأسبوع الماضي، هالشهر، الشهر الماضي، الدولار، الإيجار، المورد، طلبية.
 أسماء زباينه: ${CUSTOMERS.map((c) => c.name).join('، ')}. موادّه: ${PRODUCTS.map((p) => [p.name, ...p.alias].join('/')).join('، ')}. الموردين: الرافدين، مشروبات البصرة، مخازن الأمل.
+كلمات لهجة عراقية اكتبها مثل ما تنگال (لا تحولها للفصحى): ${sttHints()}.
 إذا كلمة مسموعة قريبة من وحدة من هذي الكلمات أو الأسماء، اكتبها بالشكل الصحيح.
 اكتب الأرقام بالأرقام (مثلاً 25 الف، 3 كراتين). لا تجاوب على السؤال، ولا تضيف تعليق، ولا تكتب أي شي ما انگال. إذا ماكو كلام أبد أرجع text فارغ.
 أرجع JSON فقط: {"text":"..."}`;
