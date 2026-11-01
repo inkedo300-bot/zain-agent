@@ -28,7 +28,7 @@ const MODEL_STRONG = process.env.GEMINI_MODEL_STRONG || 'gemini-flash-latest';
 const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
 const TEXT_PROVIDER = process.env.LLM_TEXT_PROVIDER || (process.env.GROQ_API_KEY ? 'groq' : 'gemini');
 // Voice (see README «الصوت»):
-//   speech → text: Gemini (knows the shop's names) → Grok STT (xAI) → Whisper large-v3 (on Groq), order set by STT_ORDER
+//   speech → text: Whisper large-v3 (on Groq) → Gemini (knows the shop's names) → Grok STT (xAI), order set by STT_ORDER
 //   text → speech: Grok TTS (xAI). There is no Iraqi locale, so the Gulf one (closest to Basra speech) is the default.
 //   Without XAI_API_KEY the browser's own Arabic voice reads the answers.
 const WHISPER_MODEL = process.env.WHISPER_MODEL || 'whisper-large-v3';
@@ -37,7 +37,7 @@ const XAI_VOICE = process.env.XAI_VOICE || 'ara';
 const XAI_TTS_LANG = process.env.XAI_TTS_LANG || 'ar-AE';
 const XAI_BASE = process.env.XAI_BASE_URL || 'https://api.x.ai/v1';
 const GROQ_BASE = process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1';
-const STT_ORDER = (process.env.STT_ORDER || 'gemini,grok,whisper').split(',').map((x) => x.trim()).filter(Boolean);
+const STT_ORDER = (process.env.STT_ORDER || 'whisper,gemini,grok').split(',').map((x) => x.trim()).filter(Boolean);
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg' };
 
 const body = (req) => new Promise((res, rej) => {
