@@ -12,7 +12,7 @@ export async function health(force = false) {
     const r = await fetch('/api/health', { headers: headers(), cache: 'no-store' });
     const j = await r.json();
     status = { checked: true, ok: !!j.llm, model: j.model, provider: j.provider, media: j.media, providers: j.providers, keySource: j.keySource, voice: j.voice || { stt: [], tts: null } };
-  } catch { status = { checked: true, ok: false, voice: { stt: [], tts: null } }; }
+  } catch { status = { checked: true, ok: false, noServer: true, voice: { stt: [], tts: null } }; }
   return status;
 }
 export const llmStatus = () => status;

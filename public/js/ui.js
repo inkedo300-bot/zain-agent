@@ -77,7 +77,7 @@ async function renderPill(force) {
   const st = await health(force);
   const on = st.ok && S.useLLM;
   $('#enginePill').className = 'pill ' + (on ? 'ok' : 'warn');
-  $('#enginePill').innerHTML = `<span class="dot"></span><span>${on ? `Gemini متصل · ${esc(st.model)}` : st.ok ? 'Gemini موقوف من الإعدادات' : 'وضع احتياطي بدون نموذج'}</span>`;
+  $('#enginePill').innerHTML = `<span class="dot"></span><span>${on ? `${st.provider === 'groq' ? 'Groq' : 'Gemini'} متصل · ${esc(st.model)}` : st.ok ? 'النموذج موقوف من الإعدادات' : st.noServer ? 'افتح التطبيق من start.bat، مو من الملف مباشرة' : 'ماكو مفتاح: حط المفاتيح بملف .env وأعد التشغيل'}</span>`;
   const v = st.voice || {};
   $('#voicePill').className = 'pill ' + (v.tts ? 'ok' : '');
   $('#voicePill').innerHTML = `${icon('speaker', 13)}<span>يحچي: ${v.tts ? 'Grok' : 'المتصفح'} · يسمع: ${(v.stt || []).filter((e) => e !== 'gemini' || S.useLLM).map((e) => ENGINE_AR[e]).join(' ← ') || 'المتصفح'}</span>`;

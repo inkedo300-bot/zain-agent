@@ -12,9 +12,10 @@ import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = fileURLToPath(new URL('./', import.meta.url));
-const envFile = join(HERE, '.env');
-if (existsSync(envFile)) for (const line of readFileSync(envFile, 'utf8').split(/\r?\n/)) {
-  const m = line.match(/^\s*([A-Z_]+)\s*=\s*(.*)\s*$/); if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
+// Windows Notepad often saves «.env» as «.env.txt», so accept that (and «env.txt») too.
+const ENV_FILES = ['.env', '.env.txt', 'env.txt'].map((f) => join(HERE, f)).filter((f) => existsSync(f));
+for (const envFile of ENV_FILES) for (const line of readFileSync(envFile, 'utf8').replace(/^\uFEFF/, '').split(/\r?\n/)) {
+  const m = line.match(/^\s*(?:export\s+)?([A-Z_]+)\s*=\s*(.*?)\s*$/); if (m && m[2] && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
 }
 const ROOT = join(HERE, 'public');
 const LOGS = join(HERE, 'logs');
@@ -253,6 +254,7 @@ http.createServer(async (req, res) => {
   }
 }).listen(PORT, () => {
   console.log(`دفتر يشتغل → http://localhost:${PORT}`);
+  if (!process.env.GEMINI_API_KEY && !process.env.GROQ_API_KEY) console.log(`\n*** No AI key found → offline mode. Put GEMINI_API_KEY=... / GROQ_API_KEY=... in a file named .env in ${HERE}${ENV_FILES.length ? ' (found: ' + ENV_FILES.join(', ') + ', but no key inside)' : ' (no .env file there)'} ***\n`);
   console.log(process.env.GEMINI_API_KEY ? `Gemini: ${MODEL} (notebook photos: ${MODEL_STRONG})` : 'Gemini: no server key (paste one in the app settings, or run in offline mode)');
   console.log(groqKey() ? `Groq: ${GROQ_MODEL} (text tasks: ${TEXT_PROVIDER}), speech: ${WHISPER_MODEL}` : 'Groq: no key (optional)');
   console.log(xaiKey() ? `xAI Grok voice: TTS ${XAI_VOICE} (${XAI_TTS_LANG}), STT ${XAI_STT_MODEL}` : 'xAI: no key (optional; answers are read by the browser voice)');

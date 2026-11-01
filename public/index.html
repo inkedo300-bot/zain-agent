@@ -44,6 +44,7 @@
 
   <div id="modalRoot"></div>
   <input type="file" id="fileImg" accept="image/*" hidden>
+  <script>if (location.protocol === 'file:') document.getElementById('enginePill').innerHTML = '<span class="dot"></span><span>افتح التطبيق من start.bat (أو node server.js) ثم http://localhost:8080</span>';</script>
   <script type="module" src="js/ui.js"></script>
 </body>
 </html>
