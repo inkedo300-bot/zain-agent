@@ -132,6 +132,29 @@ export function parseAmount(text) {
   return numberRuns(t).find((r) => r.mult)?.value ?? null;
 }
 
+// a unit said in the dual means two: «كيلوين»، «كارتونين»، «طبقتين»
+const DUAL = /(كيلوين|كارتونين|كرتونين|لترين|طبقتين|باكيتين|قنينتين|علبتين|كيسين|ربطتين)$/;
+// ── items in a sentence: «3 كراتين ببسي و2 كيلو سكر» → [{ sku, qty, qtyGuessed }] ──
+// t is normalised text; the number is looked for just before each product word
+export function itemsIn(t) {
+  const items = [];
+  for (const p of PRODUCTS) {
+    for (const a of [p.name, ...p.alias]) {
+      const idx = t.indexOf(norm(a));
+      if (idx < 0) continue;
+      const before = t.slice(Math.max(0, idx - 22), idx).trim().split(/\s+/).slice(-3).join(' ');
+      let qty = null;
+      const dm = before.match(/(\d+)\s*\S*$/);
+      if (dm) qty = +dm[1];
+      else if (DUAL.test(before)) qty = 2; // «طبقتين بيض»، «كيلوين سكر»
+      else { const w = wordsToNumber(before.split(' ').slice(-2).join(' ')); if (w) qty = w; }
+      if (!items.find((i) => i.sku === p.sku)) items.push({ sku: p.sku, qty: qty || 1, qtyGuessed: !qty });
+      break;
+    }
+  }
+  return items;
+}
+
 // ── free-text entry: «بعت 3 كراتين ببسي لأبو حسين بالدين» ──
 export function parseEntryOffline(text) {
   const t = ' ' + normalizeIraqi(text) + ' ';
@@ -145,20 +168,7 @@ export function parseEntryOffline(text) {
   else if (has(t, ['بعت', 'بيع', 'انباع'])) out.type = 'sale';
   // items: look for "<qty> <product>" (the customer's name is cut out first, so «ست نور» is not 6)
   const ti = cust ? t.replace(norm(cust.name), ' ') : t;
-  for (const p of PRODUCTS) {
-    for (const a of [p.name, ...p.alias]) {
-      const an = norm(a);
-      const idx = ti.indexOf(an);
-      if (idx < 0) continue;
-      const before = ti.slice(Math.max(0, idx - 22), idx).trim().split(/\s+/).slice(-3).join(' ');
-      let qty = null;
-      const dm = before.match(/(\d+)\s*\S*$/);
-      if (dm) qty = +dm[1];
-      else { const w = wordsToNumber(before.split(' ').slice(-2).join(' ')); if (w) qty = w; }
-      if (!out.items.find((i) => i.sku === p.sku)) out.items.push({ sku: p.sku, qty: qty || 1, price: p.sell, qtyGuessed: !qty });
-      break;
-    }
-  }
+  for (const i of itemsIn(ti)) out.items.push({ sku: i.sku, qty: i.qty, price: PRODUCTS.find((p) => p.sku === i.sku).sell, qtyGuessed: i.qtyGuessed });
   // explicit amount («بـ 15 الف» or «15000») — only if not the item quantity
   const am = t.match(/(?:ب|بـ|مبلغ|قيمته|بسعر)\s*(\d[\d,]*\s*(?:الف|الاف|تالاف)?|[^\d\s]+\s+(?:الف|الاف|تالاف))/) || (out.type === 'payment_in' || out.type === 'expense' ? [null, t] : null);
   if (am) { const v = parseAmount(am[1]); if (v && v >= 250) out.amount = v; }

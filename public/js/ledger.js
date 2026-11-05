@@ -157,6 +157,11 @@ export class Ledger {
       rows: book.map((b) => ({ id: b.customer.id, name: b.customer.name, balance: b.balance, oldest: Math.max(...b.open.map((d) => d.age)), usual: b.usual,
         overdue: Math.max(...b.open.map((d) => d.age)) > Math.max((b.usual ?? b.customer.delay) + 14, 30), unconfirmed: b.open.filter((d) => !d.confirmed).length })) };
   }
+  // suggested credit limit: 1.5 × what the customer buys on credit in a month (last 60 days), at least 25,000
+  creditLimit(cid) {
+    const monthly = sum(this.tx.filter((t) => t.customer === cid && t.type === 'credit_sale' && t.date > addDays(TODAY, -60)), (t) => t.amount) / 2;
+    return Math.max(25000, Math.round((monthly * 1.5) / 5000) * 5000);
+  }
   customer({ name } = {}) {
     const c = findCustomer(name);
     if (!c) return { tool: 'customer', empty: true, query: name, figures: [] };

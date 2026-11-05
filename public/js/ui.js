@@ -6,11 +6,12 @@ import { health, llmStatus, getKey, setKey } from './llm.js';
 import { evalOffline, evalLLM, evalShops } from './eval.js';
 import { autoCheck, incomingOf, makeOrder, orderValue, STATUS_AR, OPEN, describe as describeOrder } from './orders.js';
 import { startRecording, speak, stopSpeaking, sttRemote } from './voice.js';
-import { FLOWS, LANES, flowSVG } from './flow.js';
+import { FLOWS, LANES, flowSVG, laneIcon, stepMs, ENTER_MS } from './flow.js';
 import { transcribe, STT_HINT, cleanTranscript, looksHallucinated } from './agent.js';
 import { agentAsk, isOpenQuestion, MAX_STEPS } from './agentloop.js';
 import { checkTransfer, messageFor, styleFor, HIGH, MEDIUM, SIGNALS } from './fraud.js';
 import { DEMO_SHOP, DEMO_CUST, prizeFor, generateTransfers } from './fraud_data.js';
+import { custAsk, custReply, makeCart, cartTotals, CUST_SUGGESTIONS } from './custagent.js';
 
 // ── helpers ──
 const $ = (s) => document.querySelector(s);
@@ -46,11 +47,12 @@ function init() {
     A: { tab: 'home', sub: null, custId: null, chat: [], draft: '', typing: false, sheet: null, toast: null, filter: 'all',
       scen: { collect: [], delaySupplier: false, salaryDelay: false }, closing: { step: 1, counted: '', exp: '', expNote: '', res: null }, nb: { page: null, entries: null, busy: false, img: null, err: null },
       recording: false, transcribing: false, speaking: -1, seen: 0, count: null },
-    B: { mode: 'cust', cid: 'C1', sid: 'S1', sheet: null, toast: null, edit: null, deliver: null },
+    B: { mode: 'cust', cid: 'C1', sid: 'S1', sheet: null, toast: null, edit: null, deliver: null, tab: 'wallet', chats: {}, draft: '', typing: false },
+    corders: [], // orders customers send from their wallet agent
     orders: [], supSet: { S1: { auto: true, cap: 2000000 }, S2: { auto: false, cap: 1000000 }, S3: { auto: false, cap: 1000000 } },
     supBal: { S1: 8450000, S2: 3200000, S3: 4125000 },
     notes: [], bal: Object.fromEntries(CUSTOMERS.map((c, i) => [c.id, 250000 + i * 37500])),
-    runs: [], events: [], audit: [], remLog: {}, tab: 'flow', flow: { key: 'debt', sel: -1, live: { debt: -1, ask: -1, agent: -1, order: -1 }, note: {}, fresh: false, zoom: false }, evalOff: null, evalShops: null, evalLLM: null, evalBusy: false, evalProg: 0,
+    runs: [], events: [], audit: [], remLog: {}, tab: 'flow', flow: { key: 'debt', sel: -1, live: { debt: -1, cust: -1, ask: -1, agent: -1, order: -1 }, note: {}, fresh: false, at: 0, speed: 1 }, evalOff: null, evalShops: null, evalLLM: null, evalBusy: false, evalProg: 0,
   };
   // pending debt confirmations from the last two weeks
   for (const t of L.tx.filter((t) => t.type === 'credit_sale' && !t.confirmed && daysBetween(t.date, TODAY) <= 14))
@@ -62,6 +64,7 @@ const VOICE = (() => { try { return { stt: 'auto', reply: 'voice', ...JSON.parse
 const saveVoice = () => { try { localStorage.setItem(VKEY, JSON.stringify(VOICE)); } catch {} };
 const ENGINE_AR = { gemini: 'Gemini', grok: 'Grok', whisper: 'Whisper large-v3', browser: 'المتصفح' };
 const describeItems = (t) => (t.items || []).map((i) => `${i.qty} ${productBySku(i.sku).name}`).join(' + ');
+const linesText = (lines) => lines.map((l) => `${l.qty} ${productBySku(l.sku).name}`).join('، ');
 // ── audit log: every write, who did it, and a 5-minute undo where undo makes sense ──
 const UNDO_MS = 5 * 60 * 1000;
 const PIN = '1234'; // demo PIN for money that leaves the shop
@@ -108,6 +111,7 @@ function homeScreen() {
   <div class="hero"><div class="hrow"><div><small>${DOW_AR[dow(TODAY)]} ${dateAr(TODAY)} · صباح الخير</small><h3>${SHOP.name}</h3></div><button class="iconbtn" data-a="sub" data-k="alerts">${icon('bell', 18)}</button></div></div>
   <div class="balcard"><small>فلوسك هسه (كاش + محفظة)</small><div class="big num">${figBtn(F('total'))}<span>د.ع</span></div>
     <div class="split"><div><small>بالجرار</small><b class="num">${figBtn(F('cash'))}</b></div><div><small>بالمحفظة</small><b class="num">${figBtn(F('wallet'))}</b></div><div><small>ديون عند الناس</small><b class="num">${figBtn(F('debts'))}</b></div></div></div>
+  ${(() => { const co = S.corders.filter((o) => o.status === 'new'); return co.length ? `<div class="sec">طلبات من محافظ الزباين</div><div class="list">${co.map(corderCard).join('')}</div>` : ''; })()}
   <div class="brief"><h4>${icon('spark', 16)} شنو عندك هالأيام</h4>
     <ul>${mb.dues.map((d) => `<li><span>${esc(d.label)} · ${dateAr(d.date)}</span><b class="num">${fmt(d.amount)}</b></li>`).join('') || '<li>ماكو دفعات كبيرة قريبة</li>'}</ul>
     ${low.map((r) => { const o = S.orders.find((x) => OPEN.includes(x.status) && x.items.some((i) => i.sku === r.sku)); return `<p>${icon('box', 13)} <b>${esc(r.name)}</b> يخلص خلال ${r.cover} يوم. ${o ? `طلبية ${esc(SUPPLIERS[o.sid].short)}: ${STATUS_AR[o.status]}.` : ''}</p>`; }).join('')}
@@ -126,6 +130,15 @@ function homeScreen() {
   <div class="sec">بيع اليوم <a data-a="tab" data-k="book">الدفتر</a></div>
   <div class="list"><div class="row"><span class="ic">${icon('chart', 18)}</span><span class="t"><b>مجموع بيع اليوم</b><small>كاش + محفظة + دين</small></span><span class="a num">${figBtn(today)}</span></div>
     ${tx.map(txRow).join('')}</div></div>`;
+}
+// an order a customer sent from their wallet agent: the owner prepares it, or says it is not available
+function corderCard(o) {
+  const c = customerById(o.cid);
+  return `<div class="ncard hl"><div class="h"><span class="av">${icon('box', 16)}</span><b>طلب ${o.id} من ${esc(c.name)}</b><small>${esc(o.time)}</small></div>
+    ${o.lines.map((l) => `<div class="srcrow"><span>${esc(productBySku(l.sku).name)} × ${l.qty}</span><b class="num">${fmt(l.qty * l.price)}</b></div>`).join('')}
+    <div class="srcrow"><span><b>المجموع</b></span><b class="num">${fmt(o.total)}</b></div>
+    <p class="muted" style="margin:6px 0;font-size:12px">${o.pay === 'wallet' ? 'دافع بالمحفظة، والمبلغ محجوز لحد ما تجهّزه.' : 'عالدفتر: الزبون طلبه بنفسه، فالدين ينسجل مؤكد.'}</p>
+    <div class="acts"><button class="go" data-a="coReady" data-id="${o.id}">جهّزته ✓</button><button data-a="coReject" data-id="${o.id}">ما متوفر</button></div></div>`;
 }
 function txRow(t) {
   const c = t.customer ? customerById(t.customer) : null;
@@ -214,8 +227,7 @@ function debtsScreen() {
 function custScreen() {
   const cid = S.A.custId, c = customerById(cid), b = L.debtBook()[cid];
   const hist = L.tx.filter((t) => t.customer === cid).slice(-8).reverse();
-  const monthly = L.tx.filter((t) => t.customer === cid && t.type === 'credit_sale' && t.date > addDays(TODAY, -60)).reduce((a, t) => a + t.amount, 0) / 2;
-  const limit = Math.max(25000, Math.round((monthly * 1.5) / 5000) * 5000);
+  const limit = L.creditLimit(cid);
   const rem = S.A.reminder?.cid === cid ? S.A.reminder : null;
   const f = { key: 'bal', label: `المطلوب من ${c.name}`, value: b.balance, ids: b.open.map((d) => d.id) };
   return `${appbar(esc(c.name), `${esc(c.full)} · <span class="ltr">${c.phone}</span>`)}
@@ -547,11 +559,20 @@ function sheetHTML(sh) {
 }
 
 // ═════════════ PHONE B: customer wallet ═════════════
+const CO_STATUS = { new: 'انرسل، بانتظار المحل', ready: 'جاهز ✓', rejected: 'المحل ما گدر يجهزه' };
 function renderB() {
   $('#sbB').innerHTML = `<span>${hhmm()}</span>${sbIcons}`;
   if (S.B.mode === 'sup') return renderSupplier();
-  const cid = S.B.cid, c = customerById(cid), b = L.debtBook()[cid];
+  const cid = S.B.cid, focused = document.activeElement?.id === 'chatInB';
+  $('#appB').innerHTML = (S.B.tab === 'chat' ? custChatScreen(cid) : custWalletScreen(cid)) + custNav() + custSheet(cid) + (S.B.toast ? toastHTML(S.B.toast) : '');
+  const cb = document.getElementById('chatBoxB'); if (cb) cb.scrollTop = cb.scrollHeight;
+  if (focused) { const i = document.getElementById('chatInB'); i?.focus(); i?.setSelectionRange(i.value.length, i.value.length); }
+}
+const custNav = () => `<nav class="bnav two">${[['wallet', 'محفظتي', 'wallet'], ['chat', 'وكيلي', 'chat']].map(([k, l, ic]) => `<button class="${S.B.tab === k ? 'on' : ''}" data-b="tabB" data-k="${k}">${icon(ic, 20)}${l}</button>`).join('')}</nav>`;
+function custWalletScreen(cid) {
+  const c = customerById(cid), b = L.debtBook()[cid];
   const notes = S.notes.filter((n) => n.cid === cid).slice().reverse();
+  const mine = S.corders.filter((o) => o.cid === cid).slice().reverse();
   const card = (n) => {
     if (n.kind === 'confirm') return `<div class="ncard ${n.status === 'new' ? 'hl' : ''}"><div class="h"><span class="av">${icon('book', 16)}</span><b>${SHOP.name} سجّل عليك دين</b><small>${esc(n.time)}</small></div><p>${esc(n.text)} = <b>${fmt(n.amount)} د.ع</b></p>
       ${n.status === 'new' ? `<div class="acts"><button class="go" data-b="confirm" data-id="${n.id}">صحيح، أأكد</button><button data-b="dispute" data-id="${n.id}">مو صحيح</button></div>` : `<div class="state ${n.status === 'disputed' ? 'neg' : 'pos'}">${n.status === 'disputed' ? 'اعترضت على هذا الدين' : 'أكدت الدين ✓'}</div>`}</div>`;
@@ -559,15 +580,59 @@ function renderB() {
       ${n.status === 'new' && b.balance > 0 ? `<div class="acts"><button class="go" data-b="pay" data-amt="${b.balance}">ادفع ${fmt(b.balance)}</button><button data-b="pay" data-amt="">ادفع جزء</button></div>` : `<div class="state pos">${n.status === 'paid' ? 'انسدد ✓' : ''}</div>`}</div>`;
     return `<div class="ncard"><div class="h"><span class="av">${icon('check', 16)}</span><b>${esc(n.title || 'إيصال')}</b><small>${esc(n.time)}</small></div><p>${esc(n.text)}</p></div>`;
   };
-  $('#appB').innerHTML = `<div class="scroll"><div class="whero"><small>محفظتي · ${esc(c.full)}</small><div class="bal num">${fmt(S.bal[cid])}<span>د.ع</span></div></div>
+  return `<div class="scroll"><div class="whero"><small>محفظتي · ${esc(c.full)}</small><div class="bal num">${fmt(S.bal[cid])}<span>د.ع</span></div></div>
+    <button class="askcard" data-b="tabB" data-k="chat"><span class="ic">${icon('chat', 18)}</span><span><b>اطلب من ${SHOP.name} بجملة</b><small>«اريد 2 كيلو سكر وببسي» · «ادفع ديني»</small></span></button>
     <div class="shopdebt"><div class="top"><span class="av">${initials(SHOP.owner)}</span><span style="flex:1"><b>${SHOP.name}</b><small>${b.balance ? `بذمتك ${fmt(b.balance)} د.ع` : 'ما بذمتك شي'}</small></span>${b.balance ? `<button class="btn sm primary" data-b="pay" data-amt="${b.balance}">ادفع</button>` : ''}</div>
       ${b.open.length ? `<div style="margin-top:8px">${b.open.slice(-3).map((d) => `<div class="srcrow"><span>${dateAr(d.date)}<small>${esc(describeItems(L.byId(d.id)))}</small></span><b class="num">${fmt(d.left)}</b></div>`).join('')}</div>` : ''}</div>
+    ${mine.length ? `<div class="sec">طلباتي</div><div class="list">${mine.map((o) => `<div class="ncard"><div class="h"><span class="av">${icon('box', 16)}</span><b>طلب ${o.id} · ${o.pay === 'wallet' ? 'مدفوع' : 'عالدفتر'}</b><small>${esc(o.time)}</small></div><p>${esc(linesText(o.lines))} = <b class="num">${fmt(o.total)}</b> د.ع</p><div class="state ${o.status === 'rejected' ? 'neg' : 'pos'}">${CO_STATUS[o.status]}</div></div>`).join('')}</div>` : ''}
     <div class="sec">حوّل فلوس</div><div class="list">${DEMO_CUST.map((d) => `<button class="row xrow" data-b="xferPick" data-id="${d.id}"><span class="ic">${icon('out', 18)}</span><span class="t"><b>${esc(d.label)}</b><small>${esc(d.hint)}</small></span><span class="a num">${fmt(d.amount)}</span></button>`).join('')}</div>
-    <div class="sec">الإشعارات</div><div class="list">${notes.map(card).join('') || '<div class="ncard"><p>ماكو إشعارات.</p></div>'}</div></div>
-    ${S.B.sheet?.kind === 'xfer' ? xferSheet(S.B.sheet, 'b') : S.B.sheet ? `<div class="sheet-bg" data-b="closeSheet"><div class="sheet"><div class="grab"></div><div class="sh"><b>ادفع لـ${SHOP.name}</b><button class="btn sm" data-b="closeSheet">سد</button></div>
-      <div class="sb"><div class="field">المبلغ<input id="payAmt" type="number" step="250" value="${S.B.sheet.amt || ''}" placeholder="${fmt(b.balance)}"></div><div class="pnote">رصيدك ${fmt(S.bal[cid])} د.ع. الدفعة توصل للمحل ومعها رقم الدين، فتتطابق وحدها.</div>
-      <button class="main" data-b="payGo">ادفع</button></div></div></div>` : ''}
-    ${S.B.toast ? toastHTML(S.B.toast) : ''}`;
+    <div class="sec">الإشعارات</div><div class="list">${notes.map(card).join('') || '<div class="ncard"><p>ماكو إشعارات.</p></div>'}</div></div>`;
+}
+// the customer's own agent: it prepares, the customer decides
+function custChatScreen(cid) {
+  const c = customerById(cid), chat = (S.B.chats[cid] ||= []);
+  const msgs = chat.map((m, i) => {
+    if (m.from === 'me') return `<div class="msg me">${esc(m.text)}</div>`;
+    if (m.cart) return cartMsg(m, i);
+    if (m.pay) return payMsg(m, i);
+    const acts = (m.actions || []).map((x, j) => `<button data-b="custAct" data-i="${i}" data-j="${j}">${esc(x.label)}</button>`).join('');
+    return `<div class="msg bot">${esc(m.text)}${m.meta || acts ? `<div class="meta">${m.meta ? `<span>${m.meta}</span>` : ''}${acts}</div>` : ''}</div>`;
+  }).join('');
+  return `${appbar('وكيلي بالمحفظة', `يجهّز طلباتك ويا ${SHOP.name}، وإنت توافق`, false)}
+  <div class="chat" id="chatBoxB">${msgs || `<div class="msg bot">هلا ${esc(c.name)}. گلّي شنو تحتاج من ${SHOP.name}، وأجهزه إلك: سلة، دفعة دين، سعر مادة. ما يروح شي إلا لما توافق.<div class="meta"><span>أشوف بس قائمة أسعار المحل وديونك إنت، مو دفتر المحل.</span></div></div>`}${S.B.typing ? '<div class="typing"><i></i><i></i><i></i></div>' : ''}</div>
+  <div class="composer"><div class="sugs">${CUST_SUGGESTIONS.map((q) => `<button data-b="custAsk" data-q="${esc(q)}">${esc(q)}</button>`).join('')}</div>
+    <div class="line"><input id="chatInB" placeholder="اكتب طلبك…" value="${esc(S.B.draft)}" autocomplete="off"><button class="cbtn send" data-b="custSend">${icon('send', 18)}</button></div></div>`;
+}
+function cartMsg(m, i) {
+  const c = m.cart, open = m.status === 'ready';
+  const rows = c.lines.map((l, j) => `<div class="cline"><span class="nm">${esc(productBySku(l.sku).name)}<small>${fmt(l.price)} للوحدة${l.guessed && open ? ' · العدد ما انذكر' : ''}</small></span>
+    ${open ? `<span class="qty"><button data-b="qty" data-i="${i}" data-j="${j}" data-d="-1" aria-label="أقل">−</button><b class="num">${l.qty}</b><button data-b="qty" data-i="${i}" data-j="${j}" data-d="1" aria-label="أكثر" ${l.qty >= l.max ? 'disabled' : ''}>+</button></span>` : `<b class="num">× ${l.qty}</b>`}<b class="num lt">${fmt(l.qty * l.price)}</b></div>`).join('');
+  const how = open ? `<div class="paych"><button class="${m.payWith === 'wallet' ? 'on' : ''}" data-b="payWith" data-i="${i}" data-k="wallet">${icon('wallet', 14)} ادفع هسه</button><button class="${m.payWith === 'credit' ? 'on' : ''}" data-b="payWith" data-i="${i}" data-k="credit" ${c.credit ? '' : 'disabled'}>${icon('book', 14)} عالدفتر</button></div>${c.credit ? '' : '<div class="cnote">عالدفتر ما يصير: دينك راح يتجاوز الحد اللي يسمح بيه المحل.</div>'}` : '';
+  const done = { sent: `انرسل ${m.orderId} ✓ بانتظار ${SHOP.name}`, done: `${SHOP.name} جهّز طلبك ✓`, rejected: `${SHOP.name} ما گدر يجهزه${m.payWith === 'wallet' ? '، ورجعت فلوسك' : ''}`, cancelled: 'انلغى' }[m.status];
+  const foot = open ? `<div class="acts2"><button class="btn primary" data-b="cartSend" data-i="${i}" ${c.lines.length ? '' : 'disabled'}>${icon('send', 14)} أرسل الطلب</button><button class="btn" data-b="cartCancel" data-i="${i}">إلغاء</button></div><small class="muted">ما ينرسل إلا لما تضغط «أرسل»${m.payWith === 'wallet' ? '. الدفع برمزك، والمبلغ ينحجز لحد ما المحل يجهّز الطلب' : ''}.</small>`
+    : `<div class="state ${m.status === 'rejected' || m.status === 'cancelled' ? 'neg' : 'pos'}">${done}</div>`;
+  return `<div class="msg bot cart">${esc(m.text)}<div class="cartbox">${rows}${c.notes.length ? `<div class="cnote">${c.notes.map(esc).join('<br>')}</div>` : ''}<div class="ctotal"><span>المجموع</span><b class="num">${fmt(c.total)} د.ع</b></div>${how}</div>${foot}${m.meta ? `<div class="meta"><span>${m.meta}</span><button data-b="custTrace">شنو سوّى الوكيل؟</button></div>` : ''}</div>`;
+}
+function payMsg(m, i) {
+  const p = m.pay, open = m.status === 'ready';
+  return `<div class="msg bot cart">${esc(m.text)}<div class="cartbox"><div class="cline"><span class="nm">بذمتك لـ${SHOP.name}</span><b class="num lt">${fmt(p.owed)}</b></div>
+    ${open ? `<div class="field" style="margin:6px 0">المبلغ<input id="payAmtB${i}" type="number" step="250" min="250" max="${p.owed}" value="${p.amount}"></div>` : `<div class="ctotal"><span>دفعت</span><b class="num">${fmt(p.amount)} د.ع</b></div>`}
+    ${p.note ? `<div class="cnote">${esc(p.note)}</div>` : ''}</div>
+    ${open ? `<div class="acts2"><button class="btn primary" data-b="payAgent" data-i="${i}">${icon('lock', 14)} ادفع بالرمز</button><button class="btn" data-b="cartCancel" data-i="${i}">إلغاء</button></div><small class="muted">رصيدك ${fmt(S.bal[S.B.cid])} د.ع. الدفعة توصل للمحل ويا رقم الدين، فتتطابق وحدها.</small>`
+      : `<div class="state ${m.status === 'cancelled' ? 'neg' : 'pos'}">${m.status === 'cancelled' ? 'انلغى' : 'انسدد ✓'}</div>`}${m.meta ? `<div class="meta"><span>${m.meta}</span><button data-b="custTrace">شنو سوّى الوكيل؟</button></div>` : ''}</div>`;
+}
+function custSheet(cid) {
+  const sh = S.B.sheet; if (!sh) return '';
+  if (sh.kind === 'xfer') return xferSheet(sh, 'b');
+  if (sh.kind === 'pin') return `<div class="sheet-bg" data-b="closeSheet"><div class="sheet"><div class="grab"></div><div class="sh"><b>${icon('lock', 16)} تأكيد بالرمز</b><button class="btn sm" data-b="closeSheet">إلغاء</button></div>
+    <div class="sb"><p>${sh.what === 'order' ? `ادفع <b class="num">${fmt(sh.amount)} د.ع</b> لـ${SHOP.name} لطلبك. المبلغ ينحجز لحد ما المحل يجهّز الطلب، وإذا ما گدر يرجع إلك وحده.` : `ادفع <b class="num">${fmt(sh.amount)} د.ع</b> لـ${SHOP.name} من دينك.`}</p>
+    <div class="pnote">وكيلك جهّز العملية، بس الفلوس ما تطلع إلا برمزك.</div>
+    <input id="pinInB" type="password" inputmode="numeric" maxlength="4" placeholder="••••" style="width:100%;text-align:center;letter-spacing:12px;font-size:24px;border:1.5px solid var(--line-2);border-radius:12px;padding:10px;margin:10px 0">
+    <button class="main" data-b="pinOkB">ادفع</button><div class="pnote" style="text-align:center">للتجربة: 1234</div></div></div></div>`;
+  const b = L.debtBook()[cid];
+  return `<div class="sheet-bg" data-b="closeSheet"><div class="sheet"><div class="grab"></div><div class="sh"><b>ادفع لـ${SHOP.name}</b><button class="btn sm" data-b="closeSheet">سد</button></div>
+    <div class="sb"><div class="field">المبلغ<input id="payAmt" type="number" step="250" value="${sh.amt || ''}" placeholder="${fmt(b.balance)}"></div><div class="pnote">رصيدك ${fmt(S.bal[cid])} د.ع. الدفعة توصل للمحل ومعها رقم الدين، فتتطابق وحدها.</div>
+    <button class="main" data-b="payGo">ادفع</button></div></div></div>`;
 }
 function renderSupplier() {
   const sp = SUPPLIERS[S.B.sid];
@@ -594,50 +659,99 @@ function renderCustSel() { $('#custSel').innerHTML = `<optgroup label="الزب�
   <optgroup label="الموردين">${Object.values(SUPPLIERS).map((sp) => { const n = S.orders.filter((o) => o.sid === sp.id && o.status === 'sent').length; return `<option value="s:${sp.id}" ${S.B.mode === 'sup' && S.B.sid === sp.id ? 'selected' : ''}>${sp.short}${n ? ` (${n})` : ''}</option>`; }).join('')}</optgroup>`; }
 
 // ═════════════ PANEL ═════════════
+let present = false; // presentation mode: walkthrough + both phones on one screen, nothing else
 const TABS = [['flow', 'مخطط العمل'], ['trace', 'خطوات الوكيل'], ['audit', 'سجل التدقيق'], ['events', 'أحداث المحفظة'], ['eval', 'التقييم'], ['data', 'البيانات'], ['how', 'شلون يشتغل']];
 function renderPanel() {
   $('#tabs').innerHTML = TABS.map(([k, l]) => `<button class="${S.tab === k ? 'on' : ''}" data-p="tab" data-k="${k}">${l}${k === 'flow' && S.flow.fresh && S.tab !== 'flow' ? '<span class="cnt live">جديد</span>' : ''}${k === 'audit' && S.audit.length ? `<span class="cnt">${S.audit.length}</span>` : ''}${k === 'trace' && S.runs.length ? `<span class="cnt">${S.runs.length}</span>` : ''}${k === 'events' && S.events.length ? `<span class="cnt">${S.events.length}</span>` : ''}</button>`).join('');
   if (S.tab !== 'flow') flowStop(); else S.flow.fresh = false;
-  if (S.flow.zoom) { const z = document.querySelector('#flowZoomBody'); if (z) z.innerHTML = flowInner(true); else S.flow.zoom = false; }
+  // the diagram box scrolls on its own; keep its position across re-renders so the camera glides
+  const keep = document.querySelector('.fsvgwrap')?.scrollTop || 0;
   $('#panelBody').innerHTML = { flow: panelFlow, audit: panelAudit, trace: panelTrace, events: panelEvents, eval: panelEval, data: panelData, how: panelHow }[S.tab]();
+  const box = document.querySelector('.fsvgwrap'); if (box) box.scrollTop = keep;
+  // while the walkthrough is on a step, the phone it happens on glows
+  const F = S.flow, on = S.tab === 'flow' && F.sel >= 0;
+  document.body.dataset.flane = on ? FLOWS[F.key].steps[F.sel].lane : '';
 }
 // ── workflow diagram ──
 function flowMark(key, id, note) {
   const i = FLOWS[key].steps.findIndex((x) => x.id === id);
-  const F = S.flow; F.live[key] = i; F.note[key] = note; F.key = key; F.sel = -1; F.fresh = true; flowStop();
-  renderPanel();
+  const F = S.flow; F.live[key] = i; F.note[key] = note; F.key = key; F.sel = -1; F.fresh = true; F.at = Date.now(); flowStop();
+  renderPanel(); flowFocus();
 }
-function flowStop() { clearInterval(S.flow?.timer); if (S.flow) { S.flow.timer = null; } }
+function flowStop() { clearTimeout(S.flow?.timer); if (S.flow) { S.flow.timer = null; } }
+// show step i; with play, autoplay moves on after the step's reading time
+function flowGo(i, play) {
+  const F = S.flow, steps = FLOWS[F.key].steps;
+  flowStop(); F.sel = i; F.at = Date.now();
+  if (play) F.timer = setTimeout(() => (i < steps.length - 1 ? flowGo(i + 1, true) : (flowStop(), renderPanel())), stepMs(steps[i]) / F.speed);
+  renderPanel(); flowFocus();
+}
 function flowPlay() {
-  const F = S.flow; if (F.timer) { flowStop(); renderPanel(); return; }
-  const n = FLOWS[F.key].steps.length; F.sel = F.sel >= n - 1 ? 0 : Math.max(0, F.sel + (F.sel < 0 ? 1 : 0)); renderPanel();
-  F.timer = setInterval(() => { if (F.sel >= n - 1) { flowStop(); renderPanel(); return; } F.sel++; renderPanel(); }, 1800);
-  renderPanel();
+  const F = S.flow, n = FLOWS[F.key].steps.length;
+  if (F.timer) { flowStop(); renderPanel(); return; }
+  flowGo(F.sel < 0 || F.sel >= n - 1 ? 0 : F.sel, true);
 }
-function flowInner(big) {
-  const F = S.flow, fl = FLOWS[F.key], live = F.live[F.key];
-  const cur = F.sel >= 0 ? F.sel : live;
-  const st = cur >= 0 ? fl.steps[cur] : null;
-  const lane = st ? LANES[st.lane] : null;
-  const legend = `<div class="flegend"><span><i class="k sel"></i>الخطوة المختارة</span><span><i class="k done"></i>صارت بالتطبيق</span><span><i class="k live"></i>آخر خطوة صارت</span><span><i class="k dec"></i>قرار</span></div>`;
-  return `${live >= 0 ? `<div class="flive">${icon('check', 14)}<span><b>صار هسه بالتطبيق:</b> ${esc(F.note[F.key] || '')} · وصل للخطوة ${live + 1} من ${fl.steps.length}</span></div>` : ''}
-    <div class="fexp">${st ? `<div class="fexp-h"><span class="fnum" style="background:${F.sel >= 0 ? '#5b2a86' : '#e0287a'}">${cur + 1}</span><b>${esc(st.t.replace('|', ' '))}</b><span class="flane" style="color:${lane.color};border-color:${lane.color}">${lane.title}</span></div><p>${esc(st.x)}</p><small class="muted">وين تشوفها: ${esc(st.where)}</small>`
-      : '<p>اضغط <b>شغّل</b> حتى تمشي الخطوات وحدة وحدة، أو اضغط أي مربع حتى تشوف شرحه. أي شي تسويه بالهاتفين يتلوّن هنا.</p>'}</div>
-    <div class="fsvgwrap ${big ? 'big' : ''}">${flowSVG(F.key, { sel: F.sel, live })}</div>
-    ${legend}`;
+// scroll the diagram (not the page) so the step that just changed sits in the middle
+function flowFocus() {
+  requestAnimationFrame(() => {
+    for (const box of document.querySelectorAll('.fsvgwrap')) {
+      const node = box.querySelector('.fnode.sel, .fnode.enter');
+      if (!node || box.scrollHeight <= box.clientHeight) continue;
+      const r = node.getBoundingClientRect(), b = box.getBoundingClientRect();
+      box.scrollBy({ top: r.top + r.height / 2 - (b.top + b.height / 2), behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    }
+  });
+}
+// presentation mode hides the top bar and the panel's tabs; the phones stay beside the diagram
+function setPresent(on) {
+  present = on; document.body.classList.toggle('present', on);
+  if (on) S.tab = 'flow';
+  fitPhones(); renderPanel(); flowFocus();
+}
+// the phones shrink to fit the window, so they always sit beside the diagram on one screen
+function fitPhones() {
+  // twice: the new width can re-wrap the headings above the phones, which moves them
+  for (let k = 0; k < 2; k++) {
+    const top = Math.max(...['#phoneA', '#phoneB'].map((s) => $(s).getBoundingClientRect().top)) + scrollY;
+    const byH = (innerHeight - top - 12) / 720, byW = (innerWidth - 88 - 440) / 700;
+    document.documentElement.style.setProperty('--pz', innerWidth > 1000 ? Math.max(0.6, Math.min(1, byH, byW)).toFixed(3) : '1');
+  }
+}
+addEventListener('resize', fitPhones);
+function flowInner() {
+  const F = S.flow, fl = FLOWS[F.key], n = fl.steps.length, live = F.live[F.key];
+  const walk = F.sel >= 0, cur = walk ? F.sel : live;
+  const st = cur >= 0 ? fl.steps[cur] : null, lane = st ? LANES[st.lane] : null;
+  const t = Math.min(Date.now() - F.at, 60000), fresh = cur >= 0 && t < ENTER_MS;
+  const prevKey = cur > 0 ? fl.steps[cur - 1].lane : null;
+  // progress: one segment per step; while playing, the current one fills over the step's reading time
+  const segs = fl.steps.map((s, i) => `<button class="fseg ${walk ? (i < F.sel ? 'past' : i === F.sel ? 'sel' : '') : i <= live ? 'done' : ''}" data-p="flowStep" data-i="${i}" aria-label="الخطوة ${i + 1}">${i === F.sel && F.timer ? `<i style="animation-duration:${Math.round(stepMs(s) / F.speed)}ms;animation-delay:${-t}ms"></i>` : ''}</button>`).join('');
+  const ctl = `<div class="fctl"><button class="btn sm" data-p="flowPrev" ${F.sel <= 0 ? 'disabled' : ''} aria-label="الخطوة السابقة">›</button><button class="btn sm primary" data-p="flowPlay">${F.timer ? '⏸ وقف' : walk && F.sel >= n - 1 ? '↺ من جديد' : '▶ شغّل'}</button><button class="btn sm" data-p="flowNext" ${F.sel >= n - 1 ? 'disabled' : ''} aria-label="الخطوة التالية">‹</button><button class="btn sm fspeed" data-p="flowSpeed" title="سرعة التشغيل">${F.speed}×</button>
+    <div class="fprog">${segs}</div><span class="fcount num">${walk ? `${F.sel + 1} / ${n}` : `${n} خطوة`}</span><button class="btn sm" data-p="present" title="المخطط والهاتفين بنفس الشاشة، بدون أي شي ثاني (Esc للخروج)">${present ? '✕ خروج من العرض' : '⤢ وضع العرض'}</button></div>`;
+  const tryBtn = `<button class="btn sm ftry" data-p="flowTry">${esc(fl.try.label)}</button>`;
+  // the explanation appears word by word when the step changes
+  const words = (s) => fresh ? esc(s).split(' ').map((w, i) => `<span style="--i:${i}">${w}</span>`).join(' ') : esc(s);
+  const hand = st ? `<div class="fhand">${prevKey && prevKey !== st.lane ? `<span class="flane" style="--lc:${LANES[prevKey].color}">${laneIcon(prevKey, 13)}${LANES[prevKey].title}</span><span class="farr">←</span>` : ''}<span class="flane on" style="--lc:${lane.color}">${laneIcon(st.lane, 13)}${lane.title}</span></div>` : '';
+  const cap = st ? `<div class="fexp ${fresh ? 'enter' : ''}"><div class="fexp-h"><span class="fnum ${walk ? '' : 'live'}">${cur + 1}</span><b>${esc(st.t.replace('|', ' '))}</b>${tryBtn}</div>${hand}
+      <p class="fwords">${words(st.x)}</p><small class="muted">وين تشوفها: ${esc(st.where)}</small>
+      ${walk && F.sel === n - 1 ? `<div class="fdone">${icon('check', 16)}<span>${esc(fl.done)}</span></div>` : ''}</div>`
+    : `<div class="fexp idle"><div class="fexp-h"><b>${esc(fl.title)}</b>${tryBtn}</div><p>${esc(fl.sum)}</p><small class="muted">اضغط <b>▶ شغّل</b> وتابع النقطة المضيئة، أو اضغط أي مربع. أي شي تسويه بالهاتفين يتلوّن هنا وحده. وبالكيبورد: ← → خطوة، والمسافة تشغّل وتوقف.</small></div>`;
+  const legend = `<div class="flegend"><span><i class="k sel"></i>الخطوة الحالية</span><span><i class="k past"></i>خلصت بالعرض</span><span><i class="k done"></i>صارت بالتطبيق</span><span><i class="k live"></i>آخر خطوة صارت</span><span><i class="k dec"></i>قرار</span><span><i class="k tok"></i>تنقل الخطوة بين الأطراف</span></div>`;
+  return `<div class="fstage" style="--t:${-t}ms">${ctl}${cap}
+    ${live >= 0 ? `<div class="flive">${icon('check', 14)}<span><b>صار هسه بالتطبيق:</b> ${esc(F.note[F.key] || '')} · وصل للخطوة ${live + 1} من ${n}</span></div>` : ''}
+    <div class="fsvgwrap">${flowSVG(F.key, { sel: F.sel, live, t, uid: 'p' })}</div>
+    ${legend}</div>`;
 }
 function panelFlow() {
-  const F = S.flow, fl = FLOWS[F.key], n = fl.steps.length;
+  const F = S.flow;
   return `<div class="flow">
-    <div class="fhead"><div class="seg">${Object.entries(FLOWS).map(([k, f]) => `<button class="${F.key === k ? 'on' : ''}" data-p="flowKey" data-k="${k}">${f.title}${F.live[k] >= 0 ? ' <i class="ldot"></i>' : ''}</button>`).join('')}</div>
-      <div class="fctl"><button class="btn sm" data-p="flowPrev" ${F.sel <= 0 ? 'disabled' : ''} aria-label="السابق">›</button><button class="btn sm primary" data-p="flowPlay">${F.timer ? '⏸ وقف' : '▶ شغّل'}</button><button class="btn sm" data-p="flowNext" ${F.sel >= n - 1 ? 'disabled' : ''} aria-label="التالي">‹</button>
-      <button class="btn sm" data-p="flowTry">${esc(fl.try.label)}</button><button class="btn sm" data-p="flowZoom">تكبير</button></div></div>
-    ${flowInner(false)}</div>`;
+    <div class="fhead"><div class="seg">${Object.entries(FLOWS).map(([k, f]) => `<button class="${F.key === k ? 'on' : ''}" data-p="flowKey" data-k="${k}">${f.title}${F.live[k] >= 0 ? ' <i class="ldot"></i>' : ''}</button>`).join('')}</div></div>
+    ${flowInner()}</div>`;
 }
 const srcTag = (s) => `<span class="src ${s === 'gemini' ? 'g' : s === 'offline' ? 'o' : 't'}">${s === 'gemini' ? 'Gemini' : s === 'offline' ? 'بدون نموذج' : 'قالب'}</span>`;
 function panelTrace() {
   if (!S.runs.length) return `<div class="empty">اسأل المساعد بهاتف صاحب المحل.<br>هنا تشوف: شلون انفهم السؤال، أي أداة اشتغلت، الأرقام اللي حسبتها،<br>وهل جواب النموذج اجتاز التحقق من الأرقام.</div>`;
-  return S.runs.map((r) => `<div class="run"><div class="rh"><b>«${esc(r.q)}»</b><span class="src">${r.ms} ms</span></div>
+  return S.runs.map((r) => `<div class="run"><div class="rh"><b>«${esc(r.q)}»</b>${r.who ? `<span class="tag info">${esc(r.who)}</span>` : ''}<span class="src">${r.ms} ms</span></div>
     ${r.trace.map((t) => {
       if (t.step === 'فهم السؤال') return `<div class="step"><span class="k">١. فهم السؤال</span><div>${srcTag(t.source)} ${t.ms ? `<span class="muted">${t.ms} ms</span>` : ''}${t.fallback ? ` <span class="tag unconf">رجعنا للمحلل الثابت: ${esc(t.fallback)}</span>` : ''}<pre>${esc(JSON.stringify(t.detail))}</pre></div></div>`;
       if (t.step === 'وكيل') {
@@ -646,6 +760,12 @@ function panelTrace() {
         if (t.kind === 'blocked') return `<div class="step"><span class="k">انمنع</span><div><span class="tag late">${esc(t.tool)}</span> ${esc(t.note)}</div></div>`;
         if (t.kind === 'final') return `<div class="step"><span class="k">الجواب</span><div>${t.source === 'gemini' ? (t.accepted ? '<span class="tag ok">كل رقم رجعته أداة</span>' : `<span class="tag late">انرفض: ${esc((t.problems || [])[0] || '')}</span>`) : `<span class="tag unconf">${esc(t.note || 'سير عمل ثابت')}</span>`}</div></div>`;
         if (t.kind === 'error') return `<div class="step"><span class="k">خطأ</span><div>${esc(t.note)}</div></div>`;
+        return '';
+      }
+      if (t.step === 'وكيل الزبون') {
+        if (t.kind === 'guard') return `<div class="step"><span class="k">انمنع</span><div><span class="tag late">${esc(t.note)}</span></div></div>`;
+        if (t.kind === 'understand') return `<div class="step"><span class="k">فهم الطلب</span><div>${srcTag(t.source)}${t.fallback ? ` <span class="tag unconf">رجعنا للمحلل الثابت: ${esc(t.fallback)}</span>` : ''} <span class="tag ok">للنموذج: نص الطلب وقائمة المواد بس</span>${t.sent ? `<br><code>${esc(t.sent)}</code>` : ''}<pre>${esc(JSON.stringify(t.intent))}</pre></div></div>`;
+        if (t.kind === 'compute') return `<div class="step"><span class="k">الحساب</span><div>${esc(t.note)}</div></div>`;
         return '';
       }
       if (t.step === 'الخصوصية') return `<div class="step"><span class="k">الخصوصية</span><div><span class="tag ok">الأسماء مخفية</span> اللي وصل للنموذج: <code>${esc(t.sent)}</code></div></div>`;
@@ -826,6 +946,48 @@ function actCard(m, i) {
   return `<div class="msg bot"><b>${head}</b>${a.kind === 'remind' && a.source ? ` <span class="src ${a.source === 'gemini' ? 'g' : 't'}">${a.source === 'gemini' ? 'Gemini' : 'قالب'}</span>` : ''}${body}${foot}${m.meta ? `<div class="meta"><span>${m.meta}</span></div>` : ''}</div>`;
 }
 
+// ═════════════ the customer's agent ═════════════
+async function custSend(text) {
+  text = (text || '').trim(); if (!text) return;
+  const cid = S.B.cid, chat = (S.B.chats[cid] ||= []);
+  S.B.draft = ''; S.B.tab = 'chat'; chat.push({ from: 'me', text }); S.B.typing = true; renderB();
+  const r = await custAsk(L, cid, text, { useLLM: useLLM(), orders: S.corders });
+  S.B.typing = false;
+  const meta = `${r.source === 'gemini' ? 'فهمه Gemini' : 'فهمه المحلل الثابت'}${r.fallback ? ' · ' + esc(r.fallback) : ''} · الأرقام بالكود`;
+  const rp = r.reply;
+  if (rp.kind === 'cart') { chat.push({ from: 'bot', text: rp.text, cart: rp.cart, payWith: 'wallet', status: 'ready', src: r.source, meta }); flowMark('cust', 'k4', `سلة جاهزة بمحفظة ${customerById(cid).name}: ${linesText(rp.cart.lines)} = ${fmt(rp.cart.total)}`); }
+  else if (rp.kind === 'pay') chat.push({ from: 'bot', text: rp.text, pay: rp.pay, status: 'ready', meta });
+  else chat.push({ from: 'bot', text: rp.text, actions: rp.actions, meta: rp.guard ? 'انمنع: معلومات مو إلك' : '' });
+  S.runs.unshift({ q: text, ms: r.ms, who: `وكيل ${customerById(cid).name}`, trace: r.trace });
+  renderB(); renderPanel();
+}
+// a payment from the customer's wallet carries the open debt's number, so the ledger matches it by itself
+function custPay(cid, amt, via) {
+  const c = customerById(cid), ref = L.debtBook()[cid].open[0]?.id || null;
+  const t = L.add({ type: 'payment_in', channel: 'wallet', customer: cid, amount: amt, debtRef: ref, note: `تسديد من ${c.name} (${via === 'agent' ? 'وكيله بالمحفظة' : 'رابط دفع'})` });
+  S.bal[cid] -= amt;
+  S.notes.filter((x) => x.cid === cid && x.kind === 'reminder' && x.status === 'new').forEach((x) => { x.status = 'paid'; });
+  S.notes.push({ id: 'P' + t.id, cid, kind: 'receipt', title: 'دفعت بنجاح', time: 'هسه', text: `${fmt(amt)} د.ع لـ${SHOP.name}. رقم العملية ${t.id}.` });
+  event(`${c.name} دفع ${fmt(amt)} ${via === 'agent' ? 'من وكيله بالمحفظة' : 'برابط الدفع'}، وتطابق تلقائياً مع دين ${ref || '—'}.`);
+  if (via === 'agent') audit({ action: 'تسديد دين من محفظة الزبون', detail: `${c.name} · ${fmt(amt)} د.ع`, by: 'الزبون (وكيله جهّز الدفعة، وهو أكد بالرمز)', model: 'وكيل الزبون، المبلغ بالكود', tier: 'حركة فلوس · رمز PIN' });
+  toastA(`وصلك ${fmt(amt)} د.ع من ${c.name}`, 'تطابق تلقائياً مع الدين ✓', { ok: true, icon: 'link' });
+  flowMark('debt', 'd12', `${c.name} دفع ${fmt(amt)} وتطابق مع الدين`);
+  return t;
+}
+// the order lands on the shop owner's phone; money paid now is held until the shop marks it ready
+function placeOrder(cid, i, pay) {
+  const m = S.B.chats[cid][i], cart = cartTotals(L, cid, m.cart), c = customerById(cid);
+  const o = { id: 'K' + (S.corders.length + 1), cid, lines: cart.lines.map(({ sku, qty, price }) => ({ sku, qty, price })), total: cart.total, pay, status: 'new', time: hhmm() };
+  if (pay === 'wallet') S.bal[cid] -= o.total;
+  S.corders.push(o); Object.assign(m, { status: 'sent', orderId: o.id, cart });
+  audit({ action: 'طلب من محفظة الزبون', detail: `${c.name} · ${linesText(o.lines)} · ${fmt(o.total)} د.ع ${pay === 'wallet' ? '(مدفوع ومحجوز)' : '(عالدفتر)'}`, by: `الزبون (وافق على السلة${pay === 'wallet' ? ' وأكد بالرمز' : ''})`,
+    model: `وكيل الزبون: ${m.src === 'gemini' ? 'Gemini فهم الطلب' : 'المحلل الثابت'}، والأسعار بالكود`, tier: pay === 'wallet' ? 'حركة فلوس · رمز PIN' : 'طلب · موافقة الزبون' });
+  event(`${c.name} أرسل طلب ${o.id} من محفظته: ${linesText(o.lines)} (${fmt(o.total)})، ${pay === 'wallet' ? 'مدفوع والمبلغ محجوز' : 'عالدفتر'}.`);
+  S.A.tab = 'home'; S.A.sub = null; S.A.sheet = null;
+  toastA(`طلب جديد من ${c.name}`, `${linesText(o.lines)} · ${fmt(o.total)} د.ع`, { icon: 'bell', long: true });
+  flowMark('cust', 'k6', `طلب ${o.id} من ${c.name} وصل للمحل`);
+  renderB(); renderCustSel();
+}
 async function sendChat(text, opts = {}) {
   text = (text || '').trim(); if (!text) return;
   const A = S.A; A.draft = ''; stopSpeaking(); A.speaking = -1; A.chat.push({ from: 'me', text, voice: opts.voice, engine: opts.engine }); A.typing = true; renderA();
@@ -1012,6 +1174,32 @@ document.addEventListener('click', async (ev) => {
       case 'propOrd': await startAction({ tool: 'order', args: { supplier: a.dataset.id } }, 'button'); break;
       case 'remCust': await startAction({ tool: 'remind', args: { name: a.dataset.n } }, 'button'); break;
       case 'actCancel': { const m = A.chat[+a.dataset.i]; m.act.status = 'cancelled'; renderA(); break; }
+      case 'coReady': case 'coReject': {
+        const o = S.corders.find((x) => x.id === a.dataset.id); if (!o || o.status !== 'new') break;
+        const c = customerById(o.cid), msg = Object.values(S.B.chats).flat().find((m) => m.orderId === o.id);
+        if (k === 'coReady') {
+          const items = o.lines.map((l) => ({ ...l, cost: L.currentCost(l.sku) }));
+          const t = o.pay === 'wallet'
+            ? L.add({ type: 'sale', channel: 'wallet', customer: o.cid, items, amount: o.total, note: `طلب ${o.id} من محفظة ${c.name}` })
+            : L.add({ type: 'credit_sale', channel: 'credit', customer: o.cid, items, amount: o.total, confirmed: true, note: `طلب ${o.id} من محفظة ${c.name} (الزبون أكده)` });
+          o.status = 'ready'; o.txId = t.id; if (msg) msg.status = 'done'; // the cart message: 'ready' means still editable
+          runAuto();
+          S.notes.push({ id: 'K' + t.id, cid: o.cid, kind: 'receipt', title: 'طلبك جاهز ✓', time: 'هسه', text: `${SHOP.name} جهّز طلب ${o.id}: ${linesText(o.lines)}. ${o.pay === 'wallet' ? `دفعت ${fmt(o.total)} د.ع.` : `انضاف ${fmt(o.total)} د.ع لدينك.`}` });
+          audit({ action: o.pay === 'wallet' ? 'بيع من طلب زبون' : 'دين من طلب زبون', detail: `${c.name} · ${fmt(o.total)} د.ع`, by: 'التاجر (جهّز الطلب)', model: '—', tier: 'تسجيل' });
+          event(`${SHOP.owner} جهّز طلب ${o.id} لـ${c.name}، وانسجل ${o.pay === 'wallet' ? 'بيع بالمحفظة' : 'دين مؤكد'} ${fmt(o.total)}، والمخزون نقص.`);
+          toastA('انسجل بالدفتر', `${o.pay === 'wallet' ? 'بيع بالمحفظة' : 'دين مؤكد'} · ${fmt(o.total)} د.ع`, { ok: true, icon: 'check' });
+          flowMark('cust', 'k8', `طلب ${o.id} جاهز وانسجل بالدفتر`);
+        } else {
+          o.status = 'rejected'; if (msg) msg.status = 'rejected';
+          if (o.pay === 'wallet') S.bal[o.cid] += o.total;
+          S.notes.push({ id: 'X' + o.id, cid: o.cid, kind: 'receipt', title: 'المحل ما گدر يجهز طلبك', time: 'هسه', text: `طلب ${o.id}: ${linesText(o.lines)}.${o.pay === 'wallet' ? ` رجع ${fmt(o.total)} د.ع لمحفظتك.` : ''}` });
+          event(`${SHOP.owner} ما گدر يجهز طلب ${o.id}${o.pay === 'wallet' ? `، ورجع ${fmt(o.total)} لمحفظة ${c.name}` : ''}.`);
+          toastA('رديت الطلب', o.pay === 'wallet' ? 'المبلغ رجع للزبون وحده' : '', { icon: 'x' });
+          flowMark('cust', 'k6', `طلب ${o.id} ما تجهّز${o.pay === 'wallet' ? '، والمبلغ رجع للزبون' : ''}`);
+        }
+        if (S.B.mode === 'cust' && S.B.cid === o.cid) toastB(k === 'coReady' ? 'طلبك جاهز ✓' : 'المحل ما گدر يجهز طلبك', linesText(o.lines), { ok: k === 'coReady' }); else renderCustSel();
+        break;
+      }
     }
     return;
   }
@@ -1025,6 +1213,52 @@ document.addEventListener('click', async (ev) => {
         renderB(); renderCustSel(); break;
       }
       case 'pay': S.B.sheet = { amt: b.dataset.amt }; renderB(); break;
+      case 'tabB': S.B.tab = b.dataset.k; S.B.sheet = null; renderB(); if (S.B.tab === 'chat') $('#chatInB')?.focus(); break;
+      case 'custAsk': custSend(b.dataset.q); break;
+      case 'custSend': custSend($('#chatInB')?.value); break;
+      case 'custTrace': S.tab = 'trace'; renderPanel(); break;
+      case 'custAct': {
+        const chat = S.B.chats[cid], m = chat[+b.dataset.i], x = m.actions?.[+b.dataset.j]; if (!x) break;
+        m.actions = [];
+        if (x.k === 'pay') { const rp = custReply(L, cid, { intent: 'pay', all: true }); chat.push(rp.kind === 'pay' ? { from: 'bot', text: rp.text, pay: rp.pay, status: 'ready' } : { from: 'bot', text: rp.text }); }
+        else if (x.k === 'cart') {
+          const cart = makeCart(L, cid, x.items);
+          chat.push(cart.lines.length ? { from: 'bot', text: 'ضفتها للسلة. عدّل الكميات واختار شلون تدفع:', cart, payWith: 'wallet', status: 'ready' } : { from: 'bot', text: cart.notes.join(' ') });
+          if (cart.lines.length) flowMark('cust', 'k4', `سلة جاهزة بمحفظة ${customerById(cid).name}: ${linesText(cart.lines)}`);
+        }
+        renderB(); break;
+      }
+      case 'qty': {
+        const m = S.B.chats[cid][+b.dataset.i]; if (m.status !== 'ready') break;
+        const l = m.cart.lines[+b.dataset.j]; l.qty = Math.max(0, Math.min(l.max, l.qty + +b.dataset.d));
+        m.cart = cartTotals(L, cid, m.cart); if (m.payWith === 'credit' && !m.cart.credit) m.payWith = 'wallet';
+        renderB(); break;
+      }
+      case 'payWith': { const m = S.B.chats[cid][+b.dataset.i]; if (b.dataset.k === 'credit' && !m.cart.credit) break; m.payWith = b.dataset.k; renderB(); break; }
+      case 'cartCancel': { const m = S.B.chats[cid][+b.dataset.i]; if (m.status === 'ready') m.status = 'cancelled'; renderB(); break; }
+      case 'cartSend': {
+        const i = +b.dataset.i, m = S.B.chats[cid][i]; if (m.status !== 'ready') break;
+        m.cart = cartTotals(L, cid, m.cart); // recomputed from the shop's list just before it goes
+        if (!m.cart.lines.length) break;
+        if (m.payWith === 'credit') { if (!m.cart.credit) { toastB('عالدفتر ما يصير', 'دينك راح يتجاوز الحد'); break; } placeOrder(cid, i, 'credit'); break; }
+        if (m.cart.total > S.bal[cid]) { toastB('رصيدك ما يكفي', `تحتاج ${fmt(m.cart.total)} د.ع`); break; }
+        S.B.sheet = { kind: 'pin', what: 'order', i, amount: m.cart.total }; renderB(); setTimeout(() => $('#pinInB')?.focus(), 30); break;
+      }
+      case 'payAgent': {
+        const i = +b.dataset.i, m = S.B.chats[cid][i]; if (m.status !== 'ready') break;
+        const owed = L.debtBook()[cid].balance, amt = Math.min(+$('#payAmtB' + i)?.value || 0, owed);
+        if (amt < 250) { toastB('اكتب المبلغ'); break; }
+        if (amt > S.bal[cid]) { toastB('رصيدك ما يكفي'); break; }
+        m.pay.amount = amt; S.B.sheet = { kind: 'pin', what: 'pay', i, amount: amt }; renderB(); setTimeout(() => $('#pinInB')?.focus(), 30); break;
+      }
+      case 'pinOkB': {
+        const sh = S.B.sheet; if (!sh || sh.kind !== 'pin') break;
+        if ($('#pinInB').value !== PIN) { toastB('الرمز غلط', 'للتجربة: 1234'); break; }
+        S.B.sheet = null; const m = S.B.chats[cid][sh.i];
+        if (sh.what === 'order') placeOrder(cid, sh.i, 'wallet');
+        else { custPay(cid, sh.amount, 'agent'); m.status = 'paid'; toastB('دفعت بنجاح', `${fmt(sh.amount)} د.ع لـ${SHOP.name}`, { ok: true }); renderCustSel(); }
+        break;
+      }
       case 'supAccept': { const o = S.orders.find((x) => x.id === b.dataset.id); o.status = 'accepted'; o.items.forEach((i) => { i.accepted = i.qty; }); supReply(o, `${SUPPLIERS[o.sid].short} وافق على طلبية ${o.id}، التوصيل خلال ${SUPPLIERS[o.sid].lead} يوم.`); break; }
       case 'supEdit': S.B.edit = b.dataset.id; S.B.deliver = null; renderB(); break;
       case 'supCancelEdit': S.B.edit = null; S.B.deliver = null; renderB(); break;
@@ -1050,17 +1284,10 @@ document.addEventListener('click', async (ev) => {
       case 'xferPick': xferOpen('b', b.dataset.id); break;
       case 'xferCancel': case 'xferReport': case 'xferGoOn': case 'xferGo': xferAct('b', k); break;
       case 'payGo': {
-        const amt = +$('#payAmt').value; const book = L.debtBook()[cid];
+        const amt = +$('#payAmt').value;
         if (!amt || amt <= 0) break;
         if (amt > S.bal[cid]) { toastB('رصيدك ما يكفي'); break; }
-        const ref = book.open[0]?.id || null;
-        const t = L.add({ type: 'payment_in', channel: 'wallet', customer: cid, amount: amt, debtRef: ref, note: `تسديد من ${customerById(cid).name} (رابط دفع)` });
-        S.bal[cid] -= amt; S.B.sheet = null;
-        S.notes.filter((x) => x.cid === cid && x.kind === 'reminder' && x.status === 'new').forEach((x) => { x.status = 'paid'; });
-        S.notes.push({ id: 'P' + t.id, cid, kind: 'receipt', title: 'دفعت بنجاح', time: 'هسه', text: `${fmt(amt)} د.ع لـ${SHOP.name}. رقم العملية ${t.id}.` });
-        event(`${customerById(cid).name} دفع ${fmt(amt)} برابط الدفع، وتطابق تلقائياً مع دين ${ref || '—'}.`);
-        toastA(`وصلك ${fmt(amt)} د.ع من ${customerById(cid).name}`, 'تطابق تلقائياً مع الدين ✓', { ok: true, icon: 'link' });
-        flowMark('debt', 'd12', `${customerById(cid).name} دفع ${fmt(amt)} وتطابق مع الدين`);
+        S.B.sheet = null; custPay(cid, amt, 'link');
         renderB(); renderCustSel(); break;
       }
     }
@@ -1070,13 +1297,14 @@ document.addEventListener('click', async (ev) => {
     switch (p.dataset.p) {
       case 'tab': S.tab = p.dataset.k; renderPanel(); break;
       case 'undo': if (undoAudit(p.dataset.id)) { toastA('تراجعت عن العملية', '', { icon: 'check' }); renderA(); } else toastA('ما يصير تتراجع', 'فاتت 5 دقايق أو العملية ما تتراجع'); renderPanel(); break;
-      case 'flowKey': flowStop(); S.flow.key = p.dataset.k; S.flow.sel = -1; renderPanel(); break;
-      case 'flowStep': flowStop(); S.flow.sel = +p.dataset.i; renderPanel(); break;
+      case 'flowKey': flowStop(); S.flow.key = p.dataset.k; S.flow.sel = -1; S.flow.at = 0; renderPanel(); break;
+      case 'flowStep': flowGo(+p.dataset.i); break;
       case 'flowPlay': flowPlay(); break;
-      case 'flowPrev': flowStop(); S.flow.sel = Math.max(0, S.flow.sel - 1); renderPanel(); break;
-      case 'flowNext': flowStop(); S.flow.sel = Math.min(FLOWS[S.flow.key].steps.length - 1, S.flow.sel + 1); renderPanel(); break;
-      case 'flowTry': { const t = FLOWS[S.flow.key].try; if (t.chat) { S.A.tab = 'chat'; S.A.sub = null; renderA(); sendChat(t.chat); } else { S.A.sub = t.screen; renderA(); } break; }
-      case 'flowZoom': S.flow.zoom = true; $('#modalRoot').innerHTML = `<div class="modal-bg" data-m="close"><div class="modal flowmodal"><div class="mh"><h3>مخطط العمل · ${FLOWS[S.flow.key].title}</h3><button class="btn sm" data-m="close">سد</button></div><div id="flowZoomBody">${flowInner(true)}</div></div></div>`; break;
+      case 'flowPrev': flowGo(Math.max(0, S.flow.sel - 1)); break;
+      case 'flowNext': flowGo(Math.min(FLOWS[S.flow.key].steps.length - 1, S.flow.sel + 1)); break;
+      case 'flowSpeed': S.flow.speed = S.flow.speed === 1 ? 1.5 : S.flow.speed === 1.5 ? 2 : 1; if (S.flow.timer) flowGo(S.flow.sel, true); else renderPanel(); break;
+      case 'flowTry': { const t = FLOWS[S.flow.key].try; if (t.cust) { S.B.mode = 'cust'; renderCustSel(); $('#custSel').value = 'c:' + S.B.cid; setBTitle(); custSend(t.cust); break; } if (t.chat) { S.A.tab = 'chat'; S.A.sub = null; renderA(); sendChat(t.chat); } else { S.A.sub = t.screen; renderA(); } break; }
+      case 'present': setPresent(!present); break;
       case 'evalOff': S.evalOff = evalOffline(L); renderPanel(); await sleep(30); S.evalShops = evalShops(20); renderPanel(); break;
       case 'evalLLM': S.evalBusy = true; S.evalProg = 0; renderPanel(); try { S.evalLLM = await evalLLM(L, { pauseMs: 5000, onProgress: (i, n) => { S.evalProg = Math.round((i / n) * 100); renderPanel(); } }); } finally { S.evalBusy = false; renderPanel(); } break;
       case 'csv': {
@@ -1089,6 +1317,7 @@ document.addEventListener('click', async (ev) => {
 });
 document.addEventListener('input', (e) => {
   if (e.target.id === 'chatIn') S.A.draft = e.target.value;
+  if (e.target.id === 'chatInB') S.B.draft = e.target.value;
   if (e.target.dataset.nb != null) nbEdit(e.target);
 });
 document.addEventListener('change', (e) => {
@@ -1116,7 +1345,16 @@ function nbEdit(el) {
   e.ok = !!(e.customer && e.sku && e.qty && e.amount);
   e.flags = e.ok ? [] : e.flags;
 }
-document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.id === 'chatIn') sendChat(e.target.value); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.id === 'chatIn') sendChat(e.target.value); if (e.key === 'Enter' && e.target.id === 'chatInB') custSend(e.target.value); if (e.key === 'Enter' && e.target.id === 'pinInB') $('[data-b="pinOkB"]')?.click(); });
+// diagram keys: ← next step, → previous (the page reads right to left), space plays or pauses
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && present) { setPresent(false); return; }
+  if (S.tab !== 'flow' || e.altKey || e.ctrlKey || e.metaKey || e.target.closest('input, textarea, select, [contenteditable], .phone')) return;
+  const n = FLOWS[S.flow.key].steps.length;
+  if (e.key === 'ArrowLeft') { e.preventDefault(); flowGo(Math.min(n - 1, S.flow.sel + 1)); }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); flowGo(Math.max(0, S.flow.sel - 1)); }
+  else if (e.key === ' ' && !e.target.closest('button')) { e.preventDefault(); flowPlay(); }
+});
 
 // voice: record WAV → the first available engine transcribes it (Whisper large-v3 on Groq,
 // then Gemini, which knows the shop's names, then Grok). Without any key, the browser's own recogniser.
@@ -1195,7 +1433,7 @@ $('#modalRoot').addEventListener('click', async (e) => {
   const m = e.target.closest('[data-m]'); if (!m) return;
   if (m.dataset.m === 'cmp') return compareEngines();
   if (m.dataset.m === 'ttsTest') { const v = llmStatus().voice || {}; const h = await speak('هلا أبو مصطفى. اليوم بعت بمليون وأربعمية ألف دينار، وأم زينب بعدها مطلوبة إلك خمسة وعشرين ألف.', { engine: v.tts }); $('#ttsMsg').textContent = h ? `ديحچي بصوت ${ENGINE_AR[h.engine]}${h.engine === 'grok' ? ` (${v.ttsVoice} · ${v.ttsLang})` : ''}` : 'ماكو صوت عربي بهالمتصفح'; return; }
-  if (m.dataset.m === 'close' && (e.target === m || m.tagName === 'BUTTON')) { $('#modalRoot').innerHTML = ''; S.flow.zoom = false; return; }
+  if (m.dataset.m === 'close' && (e.target === m || m.tagName === 'BUTTON')) { $('#modalRoot').innerHTML = ''; return; }
   if (m.dataset.m === 'save') {
     setKey($('#keyIn').value); S.useLLM = $('#useIn').checked;
     $('#keyMsg').textContent = 'جاري التجربة…';
@@ -1246,7 +1484,7 @@ $('#flowBtn').addEventListener('click', () => { S.tab = 'flow'; renderPanel(); d
 function boot() {
   $('#shopPill').textContent = `${SHOP.name} · ${SHOP.city}`;
   S.B.mode = 'cust'; runAuto(); S.flow.key = 'debt'; S.flow.fresh = false;
-  renderCustSel(); if (S.B.mode === 'sup') $('#custSel').value = 's:' + S.B.sid; setBTitle(); renderA(); renderB(); renderPanel(); renderPill();
+  renderCustSel(); if (S.B.mode === 'sup') $('#custSel').value = 's:' + S.B.sid; setBTitle(); renderA(); renderB(); renderPanel(); renderPill(); fitPhones();
 }
 init();
 boot();

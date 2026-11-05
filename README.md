@@ -5,6 +5,7 @@
 > Every outgoing transfer passes a **transfer safety check**: 22 weighted signals about the recipient and the session (reports, brand-new account, cash-out within minutes, «ZainCash support» in the name, an active phone call, a recent OTP request…). Above 30 → light warning, above 60 → full awareness screen. Rules decide, not the model; the sender's age is never a signal (it only simplifies the wording, and a test proves the decision never changes).
 > **Voice:** speech-to-text tries Whisper large-v3 (Groq, temperature 0, verbose_json, low-confidence segments dropped) → Gemini (prompted with the shop's names) → Grok STT (xAI); answers are read aloud with Grok TTS (Gulf Arabic locale, closest to Basra; no Iraqi locale exists), or the browser's Arabic voice without a key. Settings has a side-by-side engine comparison on your own voice. Keys live only in the server's `.env`.
 > **Iraqi dialect word bank** (`public/js/lexicon.js`, written by hand for this project): 208 entries / ~1,000 spoken forms (question words, time, money and dollar slang, debts, wallet, stock, generator «امبيرات», rent «كري», Iraqi numbers like «خمسطعش» and «عشرت تالاف»). It normalises dialect for the offline rules, goes into the Gemini/Groq prompts as a glossary, and biases speech-to-text. Offline rules on heavy dialect: 6/31 → 31/31 questions on the dev set, 4/12 → 10/12 on a fresh blind set.
+> **The customer has an agent too:** in the customer's wallet, «اريد 2 كيلو سكر وببسي» becomes a cart priced from the shop's list (code computes every number), «ادفع ديني» a payment card; nothing leaves without the customer's tap, money needs the PIN, and the order lands on the shop owner's phone. It sees only the price list and the customer's own debts, never the shop's books or other customers.
 > Run: `node server.js` (Node 18+, no dependencies) → http://localhost:8080 · `npm test` · `npm run eval`. All data is synthetic.
 
 # Zain Agent · دفتر — حسابات المحل داخل المحفظة
@@ -101,6 +102,11 @@ node eval/run_agent_eval.mjs   # الوكيل على الأسئلة المفتو
 
 إذا زبون:
 
+* **وكيلي (وكيل الزبون بمحفظته):** الزبون يكتب طلبه باللهجة، والوكيل يجهّزه وهو يأكد:
+  * **سلة:** «اريد 2 كيلو سكر وكارتون ببسي»، «جيبلي طبقتين بيض»، «نفس طلبيتي الماضية». السعر من قائمة المحل والمجموع بالكود، والكمية تنقص إذا المخزون ما يكفي ويگله ليش. يعدّل الكميات، ويختار «ادفع هسه» (برمز PIN، والمبلغ ينحجز لحد ما المحل يجهّز الطلب) أو «عالدفتر» (بس ضمن حد الدين المقترح). الطلب يوصل لهاتف صاحب المحل: «جهّزته» يسجل بيع أو دين مؤكد وينقّص المخزون، و«ما متوفر» يرجّع المبلغ وحده.
+  * **دين:** «شكد بذمتي؟»، «ادفع ديني»، «ادفع عشرين» (يعني 20,000)، «سدد نص ديني». الدفعة برمز PIN، وما تتجاوز الدين، وتتطابق وياه وحدها.
+  * **أسئلة:** سعر مادة، وإذا موجودة (موجود / باقي شوية / خالص، بدون أرقام المخزون)، وشنو اشترى آخر مرة.
+  * **شنو يشوف:** قائمة أسعار المحل، وهل المادة موجودة، وديون الزبون نفسه بس. دفتر المحل وربحه وزباينه الثانيين ما يوصلهم أبداً: إذا انذكر زبون ثاني ينمنع الطلب قبل ما يوصل شي للنموذج. النموذج يطلع النية والمواد بس، وكل رقم بالكود. `public/js/custagent.js` · `tests/custagent.test.mjs` (26 فحص).
 * تأكيد أو اعتراض على دين انسجل عليه.
 * تذكير وبيه زر «ادفع».
 * دفع كامل أو جزئي من رصيده، والدفعة تتطابق تلقائياً بدفتر المحل.
@@ -115,7 +121,7 @@ node eval/run_agent_eval.mjs   # الوكيل على الأسئلة المفتو
 
 **اللوحة بالنص**
 
-* **مخطط العمل** (زر «اعرض مخطط العمل»): مخطط بمسارات (swimlanes) يربط الهاتفين: صاحب المحل يمين، والزبون أو المورد يسار، وبالنص الوكيل والدفتر والمحفظة. بيه 5 سيناريوهات: الدين والتحصيل، وسؤال بالصوت، ووكيل «ليش؟»، وفحص التحويل، وطلبية المورد. زر «شغّل» يمشي الخطوات وحدة وحدة ويا شرح كل خطوة، وأي شي تسويه بالهاتفين يتلوّن بالمخطط وحده (أخضر = صار، وردي = آخر خطوة). و«تكبير» حتى تعرضه بالشاشة كاملة.
+* **مخطط العمل** (زر «اعرض مخطط العمل»): مخطط بمسارات (swimlanes) يربط الهاتفين: صاحب المحل يمين، والزبون أو المورد يسار، وبالنص الوكيل والدفتر والمحفظة. بيه 6 سيناريوهات: الدين والتحصيل، وطلب الزبون من وكيله، وسؤال بالصوت، ووكيل «ليش؟»، وفحص التحويل، وطلبية المورد. زر «شغّل» (أو ← → والمسافة بالكيبورد) يمشي الخطوات وحدة وحدة: نقطة مضيئة تنقل الخطوة بين الأطراف، والخطوة تطلع ويا شرحها كلمة كلمة، والهاتف اللي تصير عليه يلمع. وأي شي تسويه بالهاتفين يتلوّن بالمخطط وحده (أخضر = صار، وردي = آخر خطوة). «وضع العرض» يخفي كلشي غير المخطط والهاتفين، وكلهم يبقون بنفس الشاشة، والهواتف تصغر حتى تناسب الشاشة.
 * **خطوات الوكيل:** شنو وصل للنموذج بالضبط (والأسماء مخفية)، وشلون انفهم السؤال، وأي أداة اشتغلت وأرقامها، وتفكير الوكيل بكل خطوة، والأدوات اللي انمنعت، وهل الجواب اجتاز التحقق.
 * **سجل التدقيق:** مستويات الصلاحية، وكل عملية كتابة: منو سواها، وبأي نموذج، وبأي مستوى، ويا زر **تراجع** لخمس دقايق.
 * **أحداث المحفظة:** كل اللي صار بين المحل والزبون.
@@ -175,7 +181,8 @@ flowchart TB
 | `public/js/voice.js` | تسجيل الصوت WAV (16 kHz) حتى Gemini يفرّغه |
 | `public/js/eval.js` | التقييم |
 | `server.js` | خادم بدون مكتبات: يوزّع الطلبات بين Gemini وGroq، وينظم حدود الاستخدام، والكاش، والسجل (`logs/events.jsonl`) |
-| `tests/` | اختبارات بنموذج وهمي: مسار Gemini، والأوامر، والأمان |
+| `public/js/custagent.js` | وكيل الزبون بمحفظته: يفهم الطلب، يجهّز السلة أو الدفعة بالكود، ويشوف بس بيانات الزبون نفسه |
+| `tests/` | اختبارات بنموذج وهمي: مسار Gemini، والأوامر، والأمان، وفحص التحويل، والصوت، واللهجة، ووكيل الزبون |
 
 ---
 
