@@ -1118,8 +1118,8 @@ function nbEdit(el) {
 }
 document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.id === 'chatIn') sendChat(e.target.value); });
 
-// voice: record WAV → the first available engine transcribes it (Gemini knows the shop's names,
-// then Grok, then Whisper large-v3). Without any key, the browser's own recogniser.
+// voice: record WAV → the first available engine transcribes it (Whisper large-v3 on Groq,
+// then Gemini, which knows the shop's names, then Grok). Without any key, the browser's own recogniser.
 let rec = null, srRec = null, recTimer = null, levels = [];
 function sttEngines() {
   const all = (llmStatus().voice?.stt || []).filter((e) => e !== 'gemini' || useLLM());
