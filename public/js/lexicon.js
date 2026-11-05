@@ -298,6 +298,46 @@ export const LEXICON = {
     ['ابو المحل|صاحب المحل|ابو الدكان', 'صاحب المحل'],
     ['شكو عالحساب|شكد عالحساب', 'كم الدين المسجل'],
   ],
+
+  // ── English words shop owners type in the middle of Arabic («شكد الـ sales اليوم؟») ──
+  // Chosen with the 8 mixed dev questions in eval.js; the held-out mixed set was written and frozen before these.
+  // Lower case: normalizeIraqi() lower-cases the text first. Not sent to the model prompts (models read English).
+  english: [
+    ['sales|sale|selling|revenue|income|سيلز|السيلز', 'المبيعات', 'مبيعات'],
+    ['profit|profits|net profit|margin|بروفت|البروفت', 'الربح', 'ربح'],
+    ['debt|debts|loan|loans|ديت', 'الدين', 'ديون'],
+    ['balance|بالانس', 'الرصيد', 'رصيد'],
+    ['cash', 'النقد', 'كاش'],
+    ['wallet|e-wallet|zaincash|zain cash', 'المحفظة', 'المحفظه'],
+    ['expenses|expense|spending|costs', 'المصاريف', 'مصاريف'],
+    ['rent', 'الإيجار', 'ايجار'],
+    ['generator|ampere|amperes', 'المولدة', 'المولده'],
+    ['salary|salaries|wage|wages', 'الأجور', 'اجور'],
+    ['stock|inventory|stocks', 'المخزون', 'مخزون'],
+    ['top item|top items|best seller|best sellers|best selling|most profitable', 'أكثر مادة', 'اكثر ماده'],
+    ['how much', 'كم', 'شكد'],
+    ['dollar|dollars|usd|exchange rate', 'الدولار', 'دولار'],
+    ['order|reorder', 'طلبية', 'طلبيه'],
+    ['supplier|suppliers|vendor', 'المورد', 'المورد'],
+    ['today', 'اليوم', 'اليوم'],
+    ['yesterday', 'البارحة', 'البارحه'],
+    ['this week', 'هذا الأسبوع', 'هالاسبوع'],
+    ['last week', 'الأسبوع الماضي', 'الاسبوع الماضي'],
+    ['this month', 'هذا الشهر', 'هالشهر'],
+    ['last month', 'الشهر الماضي', 'الشهر الماضي'],
+    ['week', 'الأسبوع', 'الاسبوع'],
+    ['month', 'الشهر', 'الشهر'],
+    ['sugar', 'السكر', 'سكر'],
+    ['oil|cooking oil', 'الزيت', 'زيت'],
+    ['rice', 'التمن', 'تمن'],
+    ['tea', 'الشاي', 'شاي'],
+    ['pepsi|cola|coke|soda', 'الببسي', 'ببسي'],
+    ['water', 'الماي', 'ماي'],
+    ['flour', 'الطحين', 'طحين'],
+    ['eggs|egg', 'البيض', 'بيض'],
+    ['soap|detergent|tide', 'مسحوق الغسيل', 'مسحوق'],
+    ['cigarettes|cigarette|cigs', 'الجگاير', 'جكاير'],
+  ],
 };
 
 // ── numbers as spoken in Iraq («خمسطعش»، «ثلثين»، «عشرت تالاف») ──
@@ -345,7 +385,7 @@ const MONTH_ORD = new RegExp(`(^|\\s)(ب)?الشهر\\s+(${Object.keys(ORDINAL_M
 
 // «جم بعت هسع بالامبيرات؟» → «شكد بعت هسه بالمولده؟» (normalised Arabic; customer names are left alone)
 export function normalizeIraqi(text) {
-  let t = ' ' + norm(text) + ' ';
+  let t = ' ' + norm(text).toLowerCase() + ' '; // English words come in any case: «Sales»، «SALES»
   for (let pass = 0; pass < 2; pass++) {
     for (const r of rules()) {
       if (!t.includes(r.from)) continue;

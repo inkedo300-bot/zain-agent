@@ -96,7 +96,8 @@ export function questionSet(L) {
     Q('الشاي ضل منه شي لو خلص؟', 'inventory', T.stock(tx, 'tea')),
   ];
   const refuse = ['شكد بعت بشهر 3؟', 'شكد ربحت من الدجاج؟', 'شكد مطلوب من أبو كرار؟', 'شكد بعت سنة 2024؟', 'منو أحسن لاعب بالمنتخب؟', 'شكد ربحت السنة الماضية؟'];
-  // mixed Arabic + English, as shop owners actually type (written after the parser, never tuned on)
+  // mixed Arabic + English, as shop owners actually type. Written after the parser; these 8 then chose the
+  // English words added to lexicon.js (06/11), so since then they are a dev set, not held-out.
   const mixed = [
     Q('شكد الـ sales اليوم؟', 'sales', T.sales(tx, 'today')),
     Q('شكد الprofit هالأسبوع؟', 'profit', T.net(tx, 'this_week')),
@@ -107,7 +108,22 @@ export function questionSet(L) {
     Q('شكد صرفت expenses هالشهر؟', 'expenses', T.exp(tx, 'this_month')),
     Q('sugar باقي منه بالمخزن؟', 'inventory', T.stock(tx, 'sugar')),
   ];
-  return { base, para, refuse, held, mixed };
+  // new held-out mixed set: written on 06/11 before the English words went into lexicon.js, frozen by
+  // eval/heldout.sha256 (tests/heldout.test.mjs fails if a question or its tool changes), never tuned on
+  const mixedHeld = [
+    Q('شكد sales الأسبوع الماضي؟', 'sales', T.sales(tx, 'last_week')),
+    Q('profit الشهر الماضي شكد طلع؟', 'profit', T.net(tx, 'last_month')),
+    Q('شكد الـ debts عند الناس؟', 'debts', T.debts(tx)),
+    Q('أبو حسين شكد balance مالته؟', 'customer', T.cust(tx, cid('أبو حسين'))),
+    Q('شكد rent دفعت هالشهر؟', 'expenses', T.exp(tx, 'this_month', null, 'rent')),
+    Q('eggs باقي منها بالمخزن؟', 'inventory', T.stock(tx, 'eggs')),
+    Q('شكد sales البارحة؟', 'sales', T.sales(tx, 'yesterday')),
+    Q('شنو top item هالشهر؟', 'topItems', null),
+    Q('شكد الprofit اليوم؟', 'profit', T.net(tx, 'today')),
+    Q('الـ wallet بيها شكد هسه؟', 'position', T.wallet(L)),
+    Q('شكد صرفت على الgenerator هالشهر؟', 'expenses', T.exp(tx, 'this_month', null, 'gen')),
+  ];
+  return { base, para, refuse, held, mixed, mixedHeld };
 }
 
 const ENTRIES = [
@@ -135,11 +151,12 @@ function scoreEntry(e, x) {
 }
 
 export function evalOffline(L) {
-  const { base, para, refuse, held, mixed } = questionSet(L);
+  const { base, para, refuse, held, mixed, mixedHeld } = questionSet(L);
   const runQ = (q) => { const r = routeOffline(q); const res = runTool(L, r); const f = mainFigure(r, res); return { r, res, value: f?.value ?? null }; };
   const baseRows = base.map((x) => { const o = runQ(x.q); const ok = x.truth == null ? o.r.tool === x.tool : o.r.tool === x.tool && o.value === x.truth; return { ...x, got: o.value, gotTool: o.r.tool || (o.r.refuse ? 'refuse' : '?'), ok }; });
   const heldRows = held.map((x) => { const o = runQ(x.q); const ok = x.truth == null ? o.r.tool === x.tool : o.r.tool === x.tool && o.value === x.truth; return { ...x, got: o.value, gotTool: o.r.tool || (o.r.refuse ? 'refuse' : '?'), ok }; });
   const mixedRows = mixed.map((x) => { const o = runQ(x.q); const ok = x.truth == null ? o.r.tool === x.tool : o.r.tool === x.tool && o.value === x.truth; return { ...x, got: o.value, gotTool: o.r.tool || (o.r.refuse ? 'refuse' : '?'), ok }; });
+  const mixedHeldRows = mixedHeld.map((x) => { const o = runQ(x.q); const ok = x.truth == null ? o.r.tool === x.tool : o.r.tool === x.tool && o.value === x.truth; return { ...x, got: o.value, gotTool: o.r.tool || (o.r.refuse ? 'refuse' : '?'), ok }; });
   const paraRows = para.map((g) => { const outs = g.qs.map((q) => ({ q, ...runQ(q) })); const okEach = outs.map((o) => o.r.tool === g.tool && (g.truth == null || o.value === g.truth)); return { group: g.group, n: g.qs.length, ok: okEach.filter(Boolean).length, consistent: okEach.every(Boolean), fails: outs.filter((o, i) => !okEach[i]).map((o) => o.q) }; });
   const refRows = refuse.map((q) => { const o = runQ(q); const ok = !!o.r.refuse || !!o.res?.empty; return { q, ok, got: o.r.refuse ? 'رفض' : o.r.tool }; });
   const entRows = ENTRIES.map((x) => { const e = parseEntryOffline(x.t); const c = scoreEntry(e, x); return { t: x.t, ok: Object.values(c).every(Boolean), fields: c }; });
@@ -148,6 +165,7 @@ export function evalOffline(L) {
     qa: { n: baseRows.length, ok: baseRows.filter((r) => r.ok).length, rows: baseRows },
     held: { n: heldRows.length, ok: heldRows.filter((r) => r.ok).length, rows: heldRows },
     mixed: { n: mixedRows.length, ok: mixedRows.filter((r) => r.ok).length, rows: mixedRows },
+    mixedHeld: { n: mixedHeldRows.length, ok: mixedHeldRows.filter((r) => r.ok).length, rows: mixedHeldRows },
     para: { groups: paraRows, n: paraRows.reduce((a, g) => a + g.n, 0), ok: paraRows.reduce((a, g) => a + g.ok, 0), consistentGroups: paraRows.filter((g) => g.consistent).length },
     refuse: { n: refRows.length, ok: refRows.filter((r) => r.ok).length, rows: refRows },
     entries: { n: entRows.length, ok: entRows.filter((r) => r.ok).length, fieldAcc: fieldTotals.ok / fieldTotals.n, rows: entRows },
@@ -156,8 +174,8 @@ export function evalOffline(L) {
 
 // questions answered by Gemini end to end: route + tool + phrased answer that must contain the true number
 export async function evalLLM(L, { onProgress, pauseMs = 0 } = {}) {
-  const { base, para, refuse, held, mixed } = questionSet(L);
-  const items = [...base.map((x) => ({ ...x, kind: 'qa' })), ...held.map((x) => ({ ...x, kind: 'held' })), ...mixed.map((x) => ({ ...x, kind: 'mixed' })), ...para.flatMap((g) => g.qs.map((q) => ({ q, tool: g.tool, truth: g.truth, kind: 'para', group: g.group }))), ...refuse.map((q) => ({ q, kind: 'refuse' }))];
+  const { base, para, refuse, held, mixed, mixedHeld } = questionSet(L);
+  const items = [...base.map((x) => ({ ...x, kind: 'qa' })), ...held.map((x) => ({ ...x, kind: 'held' })), ...mixed.map((x) => ({ ...x, kind: 'mixed' })), ...mixedHeld.map((x) => ({ ...x, kind: 'mixedHeld' })), ...para.flatMap((g) => g.qs.map((q) => ({ q, tool: g.tool, truth: g.truth, kind: 'para', group: g.group }))), ...refuse.map((q) => ({ q, kind: 'refuse' }))];
   const rows = [];
   for (let i = 0; i < items.length; i++) {
     const x = items[i];
@@ -171,7 +189,7 @@ export async function evalLLM(L, { onProgress, pauseMs = 0 } = {}) {
     onProgress?.(i + 1, items.length);
   }
   const by = (k) => rows.filter((r) => r.kind === k);
-  return { rows, qa: { n: by('qa').length, ok: by('qa').filter((r) => r.ok).length }, held: { n: by('held').length, ok: by('held').filter((r) => r.ok).length }, mixed: { n: by('mixed').length, ok: by('mixed').filter((r) => r.ok).length }, para: { n: by('para').length, ok: by('para').filter((r) => r.ok).length },
+  return { rows, qa: { n: by('qa').length, ok: by('qa').filter((r) => r.ok).length }, held: { n: by('held').length, ok: by('held').filter((r) => r.ok).length }, mixed: { n: by('mixed').length, ok: by('mixed').filter((r) => r.ok).length }, mixedHeld: { n: by('mixedHeld').length, ok: by('mixedHeld').filter((r) => r.ok).length }, para: { n: by('para').length, ok: by('para').filter((r) => r.ok).length },
     refuse: { n: by('refuse').length, ok: by('refuse').filter((r) => r.ok).length }, geminiRouted: rows.filter((r) => r.routeSource === 'gemini').length, geminiWritten: rows.filter((r) => r.answerSource === 'gemini').length };
 }
 

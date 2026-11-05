@@ -1,0 +1,14 @@
+{
+  "note": "held-out questions, frozen: tests/heldout.test.mjs fails if any question or expected tool changes",
+  "held": "16ca728dea40baeccc89bbf52ee5e60ccae2afbc29330aa9f63fdc05383936df",
+  "mixedHeld": "fde29bfb3a5315edb2e1e3f6a120c65c4bfcfcfc04875dd0e94882a58191d01b",
+  "frozen": "2026-11-06",
+  "firstRun": {
+    "mixedHeld": [
+      10,
+      11
+    ],
+    "date": "2026-11-06",
+    "note": "the only honest run. Its one miss («على» read as the customer «أبو علي») led to a fix in findCustomer, so this set is spent: the next review needs a fresh held-out set."
+  }
+}

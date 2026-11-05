@@ -34,15 +34,22 @@ export const coversData = (p) => p.to >= START && p.from <= TODAY;
 export const norm = (s) => (s || '').replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىی]/g, 'ي').replace(/[گک]/g, 'ك').replace(/چ/g, 'ج')
   .replace(/پ/g, 'ب').replace(/ڤ/g, 'ف').replace(/ژ/g, 'ز').replace(/[٠-٩]/g, (d) => d.charCodeAt(0) - 0x660).replace(/[۰-۹]/g, (d) => d.charCodeAt(0) - 0x6f0)
   .replace(/[ًٌٍَُِّْـ]/g, '').replace(/\s+/g, ' ').trim();
+// a name counts only as whole words (و/ب/ل/ف may stick in front: «لأبو علي»), so «عليه» is not «علي»
+const hasName = (text, name) => new RegExp(`(^|\\s)[وبلف]?${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=$|\\s)`).test(text);
+// short names that read like everyday words once ى is folded into ي: «علي» = «على», so that customer needs «أبو علي»
+const AMBIGUOUS_SHORT = new Set(['علي']);
 export function findCustomer(q) {
   const n = norm(q);
   if (!n) return null;
+  const words = n.replace(/[؟?!.,،]/g, ' ');
   let best = null, score = 0;
   for (const c of CUSTOMERS) {
-    for (const cand of [c.name, c.full, c.name.replace(/^(ابو|أبو|ام|أم|حجي|سيد|ست)\s*/, '')]) {
+    const short = c.name.replace(/^(ابو|أبو|ام|أم|حجي|سيد|ست)\s*/, '');
+    for (const cand of [c.name, c.full, short]) {
       const cn = norm(cand);
+      if (cand === short && cand !== c.name && AMBIGUOUS_SHORT.has(cn)) continue;
       let s = 0;
-      if (n.includes(cn)) s = cn.length + 5;
+      if (hasName(words, cn)) s = cn.length + 5;
       else if (cn.includes(n) && n.length >= 3) s = n.length;
       if (s > score) { score = s; best = c; }
     }
