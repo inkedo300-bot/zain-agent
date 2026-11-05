@@ -170,7 +170,7 @@ async function sttOnce(engine, { audio, prompt }) {
     url = GROQ_BASE + '/audio/transcriptions'; key = groqKey(); m = WHISPER_MODEL;
     f.append('model', m); f.append('language', 'ar'); f.append('temperature', '0'); f.append('response_format', 'verbose_json');
     // Whisper reads up to ~224 tokens of prompt: the shop's words steer spelling toward them
-    if (prompt) f.append('prompt', String(prompt).slice(0, 400));
+    if (prompt) f.append('prompt', String(prompt).slice(-400)); // keep the end, like Whisper itself does
   } else if (engine === 'grok') {
     url = XAI_BASE + '/stt'; key = xaiKey(); m = XAI_STT_MODEL;
     f.append('model', m);

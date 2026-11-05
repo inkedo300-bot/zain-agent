@@ -298,7 +298,8 @@ const STT_ASK = 'فرّغ الكلام اللي بالتسجيل الصوتي ا
 const STT_FIX = [[/محزن/g, "مخزن"], [/هال(أسماء|اسماء|سمك|اسبوغ)/g, "هالأسبوع"], [/محزون/g, 'مخزون'], [/\s*(هذا التسجيل|التسجيل الصوتي)\.?$/u, ''], [/[.،]+$/u, '']];
 export function cleanTranscript(t) { let s = (t || '').trim(); for (const [re, to] of STT_FIX) s = s.replace(re, to); return s.trim(); }
 // short vocabulary hint for Whisper / Grok (they take a plain prompt, not instructions)
-export const STT_HINT = `بقالة بالبصرة. ${CUSTOMERS.map((c) => c.name).join('، ')}. ${PRODUCTS.map((p) => p.name).join('، ')}. شكد ربحت، منو مطلوب إلي، ذكّر، اطلب من الرافدين، بالدين، الكاش، المحفظة.`;
+// Whisper keeps only the end of a long prompt (~224 tokens), so dialect words go first and the shop's own names last.
+export const STT_HINT = `${sttHints({ maxChars: 100 })}. بقالة بالبصرة. ${CUSTOMERS.map((c) => c.name).join('، ')}. ${PRODUCTS.map((p) => p.name).join('، ')}. شكد ربحت، منو مطلوب إلي، ذكّر، اطلب من الرافدين، بالدين، الكاش، المحفظة.`;
 // Whisper sometimes "hallucinates" on short or noisy Arabic clips: it repeats a phrase or
 // adds a stock line (subscribe / translation credits). Such output is rejected and the next engine tries.
 export function looksHallucinated(t) {
