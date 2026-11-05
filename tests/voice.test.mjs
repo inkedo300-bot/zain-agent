@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { looksHallucinated, cleanTranscript } from '../public/js/agent.js';
 import { speakable } from '../public/js/voice.js';
 
@@ -25,7 +26,7 @@ await new Promise((r) => fake.once('listening', r));
 const up = `http://127.0.0.1:${fake.address().port}`;
 
 const start = (env, port) => new Promise((res) => {
-  const p = spawn(process.execPath, ['server.js'], { env: { PATH: process.env.PATH, PORT: String(port), ...env }, cwd: new URL('..', import.meta.url).pathname });
+  const p = spawn(process.execPath, ['server.js'], { env: { PATH: process.env.PATH, PORT: String(port), ...env }, cwd: fileURLToPath(new URL('..', import.meta.url)) });
   p.stdout.once('data', () => res(p));
 });
 const wav = 'data:audio/wav;base64,' + Buffer.from('RIFF....WAVEfmt ').toString('base64');

@@ -5,7 +5,7 @@ services:
     name: zain-agent-daftar
     runtime: node
     plan: free
-    branch: claude/project-thread-e27k2s
+    branch: main
     buildCommand: echo "no dependencies"
     startCommand: node server.js
     healthCheckPath: /api/health
