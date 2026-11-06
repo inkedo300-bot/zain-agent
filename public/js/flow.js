@@ -150,9 +150,34 @@ export const ENTER_MS = 1800;
 // sel: step chosen in the walkthrough (-1 = overview); live: last step that really happened in the app.
 // t: ms since sel/live changed. Animations run with a negative delay of t, so a re-render mid-way
 // continues them instead of restarting. uid keeps ids apart when the panel and the zoom window both show it.
-export function flowSVG(key, { sel = -1, live = -1, t = ENTER_MS, uid = 'f' } = {}) {
+// the lane columns: background, the highlight on the current step's lane, and (with titles) the header cards
+const W = 680, HEAD = 58;
+function lanes(F, curLane, H, titles) {
+  const LW = W / F.lanes.length, out = [];
+  F.lanes.forEach((k, i) => {
+    const L = LANES[k], x = W - (i + 1) * LW, on = k === curLane;
+    out.push(`<rect x="${x}" y="0" width="${LW}" height="${H}" fill="${L.tint}"/>`);
+    if (on) out.push(`<rect x="${x}" y="0" width="${LW}" height="${H}" fill="${L.color}" class="lanehl"/>`);
+    if (i) out.push(`<line x1="${x + LW}" y1="0" x2="${x + LW}" y2="${H}" stroke="#e3dee9"/>`);
+    if (titles) out.push(`<g class="fhd ${on ? 'on' : ''}" style="--lc:${L.color}"><rect x="${x + 6}" y="6" width="${LW - 12}" height="${HEAD - 12}" rx="10" class="card"/>
+      <rect x="${x + 6}" y="6" width="${LW - 12}" height="4" rx="2" fill="${L.color}"/>
+      <g transform="translate(${x + LW - 29},16) scale(.75)" fill="none" stroke="${L.color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${LANE_ICON[k]}</g>
+      <text x="${x + LW / 2 - 11}" y="30" text-anchor="middle" class="lt" fill="${L.color}">${L.title}</text>
+      <text x="${x + LW / 2 - 11}" y="45" text-anchor="middle" class="ls">${L.sub}</text></g>`);
+  });
+  return out.join('');
+}
+// The lane titles on their own: the page pins this row at the top of the chart box, so while the steps scroll
+// under it you can still see which column each step is in. Same width and columns as flowSVG, so they line up.
+export function flowHeadSVG(key, { sel = -1, t = ENTER_MS } = {}) {
+  const F = FLOWS[key], curLane = sel >= 0 ? F.steps[sel].lane : null;
+  return `<svg viewBox="0 0 ${W} ${HEAD}" class="flowsvg fheadsvg" style="--t:${-Math.round(Math.min(t, 60000))}ms" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">${lanes(F, curLane, HEAD, true)}</svg>`;
+}
+
+// head: false draws the chart without its title row (the page shows flowHeadSVG above it instead)
+export function flowSVG(key, { sel = -1, live = -1, t = ENTER_MS, uid = 'f', head = true } = {}) {
   const F = FLOWS[key], walk = sel >= 0, cur = walk ? sel : live, fresh = cur >= 0 && t < ENTER_MS;
-  const W = 680, LW = W / F.lanes.length, NW = LW - 18, HEAD = 58, GAP = 22;
+  const LW = W / F.lanes.length, NW = LW - 18, GAP = 22;
   const cx = (lane) => W - (F.lanes.indexOf(lane) + 0.5) * LW;
   let y = HEAD + 16;
   const rows = F.steps.map((s) => { const h = s.d ? 46 : 38; const r = { ...s, y, h }; y += h + GAP; return r; });
@@ -160,20 +185,11 @@ export function flowSVG(key, { sel = -1, live = -1, t = ENTER_MS, uid = 'f' } = 
   const curLane = walk ? rows[sel].lane : null;
   const arrow = (id, c) => `<marker id="${uid}${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${c}"/></marker>`;
   const out = [];
-  out.push(`<svg viewBox="0 0 ${W} ${H}" class="flowsvg ${walk ? 'walk' : ''}" style="--t:${-Math.round(Math.min(t, 60000))}ms" role="img" aria-label="مخطط سير العمل: ${esc(F.title)}" xmlns="http://www.w3.org/2000/svg">
+  const top = head ? 0 : HEAD;
+  out.push(`<svg viewBox="0 ${top} ${W} ${H - top}" class="flowsvg ${walk ? 'walk' : ''}" style="--t:${-Math.round(Math.min(t, 60000))}ms" role="img" aria-label="مخطط سير العمل: ${esc(F.title)}" xmlns="http://www.w3.org/2000/svg">
   <defs>${arrow('ah', '#8a8494')}${arrow('ahOn', '#17845a')}${arrow('ahP', '#5b2a86')}${arrow('ahT', '#cfc9d6')}</defs>`);
   // lanes: the one the current step is on lights up
-  F.lanes.forEach((k, i) => {
-    const L = LANES[k], x = W - (i + 1) * LW, on = k === curLane;
-    out.push(`<rect x="${x}" y="0" width="${LW}" height="${H}" fill="${L.tint}"/>`);
-    if (on) out.push(`<rect x="${x}" y="0" width="${LW}" height="${H}" fill="${L.color}" class="lanehl"/>`);
-    if (i) out.push(`<line x1="${x + LW}" y1="0" x2="${x + LW}" y2="${H}" stroke="#e3dee9"/>`);
-    out.push(`<g class="fhd ${on ? 'on' : ''}" style="--lc:${L.color}"><rect x="${x + 6}" y="6" width="${LW - 12}" height="${HEAD - 12}" rx="10" class="card"/>
-      <rect x="${x + 6}" y="6" width="${LW - 12}" height="4" rx="2" fill="${L.color}"/>
-      <g transform="translate(${x + LW - 29},16) scale(.75)" fill="none" stroke="${L.color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${LANE_ICON[k]}</g>
-      <text x="${x + LW / 2 - 11}" y="30" text-anchor="middle" class="lt" fill="${L.color}">${L.title}</text>
-      <text x="${x + LW / 2 - 11}" y="45" text-anchor="middle" class="ls">${L.sub}</text></g>`);
-  });
+  out.push(lanes(F, curLane, H, head));
   // connectors: walked ones solid, the one into the current step draws itself, the rest wait faded
   for (let i = 0; i < rows.length - 1; i++) {
     const a = rows[i], b = rows[i + 1];

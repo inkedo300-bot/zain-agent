@@ -355,6 +355,8 @@ td.n { direction: ltr; text-align: right; font-feature-settings: 'tnum'; white-s
 /* the diagram scrolls on its own, and follows the current step */
 .fsvgwrap { border: 1px solid var(--line); border-radius: 12px; overflow: auto; background: #fff; max-height: max(300px, calc(100vh - 475px)); scrollbar-width: thin; }
 .flowsvg { display: block; width: 100%; height: auto; font-family: var(--font); }
+/* the lane titles stay pinned at the top of the chart box while the steps scroll under them */
+.fsvgwrap .flanehead { position: sticky; top: 0; z-index: 2; background: #fff; box-shadow: 0 1px 0 var(--line), 0 6px 10px -8px rgba(40, 20, 60, .25); }
 .flowsvg .lt { font-size: 13.5px; font-weight: 700; }
 .flowsvg .ls { font-size: 10.5px; fill: #7b7584; }
 .flowsvg .nt { font-size: 11.5px; font-weight: 600; fill: #1d1a22; }

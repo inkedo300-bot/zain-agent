@@ -6,7 +6,7 @@ import { health, llmStatus, getKey, setKey } from './llm.js';
 import { evalOffline, evalLLM, evalShops } from './eval.js';
 import { autoCheck, incomingOf, makeOrder, orderValue, STATUS_AR, OPEN, describe as describeOrder } from './orders.js';
 import { startRecording, speak, stopSpeaking, sttRemote, voiceStatus } from './voice.js';
-import { FLOWS, LANES, flowSVG, laneIcon, stepMs, ENTER_MS } from './flow.js';
+import { FLOWS, LANES, flowSVG, flowHeadSVG, laneIcon, stepMs, ENTER_MS } from './flow.js';
 import { transcribe, STT_HINT, cleanTranscript, looksHallucinated } from './agent.js';
 import { agentAsk, isOpenQuestion, MAX_STEPS } from './agentloop.js';
 import { checkTransfer, messageFor, styleFor, HIGH, MEDIUM, SIGNALS } from './fraud.js';
@@ -697,8 +697,8 @@ function flowFocus() {
     for (const box of document.querySelectorAll('.fsvgwrap')) {
       const node = box.querySelector('.fnode.sel, .fnode.enter');
       if (!node || box.scrollHeight <= box.clientHeight) continue;
-      const r = node.getBoundingClientRect(), b = box.getBoundingClientRect();
-      box.scrollBy({ top: r.top + r.height / 2 - (b.top + b.height / 2), behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+      const r = node.getBoundingClientRect(), b = box.getBoundingClientRect(), hh = box.querySelector('.flanehead')?.offsetHeight || 0;
+      box.scrollBy({ top: r.top + r.height / 2 - (b.top + hh + (b.height - hh) / 2), behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
     }
   });
 }
@@ -739,7 +739,7 @@ function flowInner() {
   const legend = `<div class="flegend"><span><i class="k sel"></i>الخطوة الحالية</span><span><i class="k past"></i>خلصت بالعرض</span><span><i class="k done"></i>صارت بالتطبيق</span><span><i class="k live"></i>آخر خطوة صارت</span><span><i class="k dec"></i>قرار</span><span><i class="k tok"></i>تنقل الخطوة بين الأطراف</span></div>`;
   return `<div class="fstage" style="--t:${-t}ms">${ctl}${cap}
     ${live >= 0 ? `<div class="flive">${icon('check', 14)}<span><b>صار هسه بالتطبيق:</b> ${esc(F.note[F.key] || '')} · وصل للخطوة ${live + 1} من ${n}</span></div>` : ''}
-    <div class="fsvgwrap">${flowSVG(F.key, { sel: F.sel, live, t, uid: 'p' })}</div>
+    <div class="fsvgwrap"><div class="flanehead">${flowHeadSVG(F.key, { sel: F.sel, t })}</div>${flowSVG(F.key, { sel: F.sel, live, t, uid: 'p', head: false })}</div>
     ${legend}</div>`;
 }
 function panelFlow() {
