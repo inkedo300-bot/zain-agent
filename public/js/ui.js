@@ -911,6 +911,7 @@ async function startAction(act, source) {
       A.chat.push({ from: 'bot', act: { kind: 'pickCust', options: top.map((r) => ({ id: r.cid || r.id, name: r.name, bal: r.balance })) }, text: 'منو تريد أذكّر؟ هذولي أكثر الناس المطلوبين إلك:' }); renderA(); return;
     }
     if (remindBlocked(c.id)) { A.chat.push({ from: 'bot', text: `ذكّرت ${c.name} قبل فترة قصيرة. حتى ما تنزعج، التذكير الجاي يصير بعد ${dateAr(addDays(S.remLog[c.id], REMIND_EVERY_DAYS))}.`, meta: '<span>حد التذكير: مرة بالأسبوع</span>' }); renderA(); return; }
+    A.ctx = { ...(A.ctx || {}), customer: c.name };
     const bal = L.debtBook()[c.id].balance;
     if (bal <= 0) { A.chat.push({ from: 'bot', text: `${c.name} ما عليه دين هسه، فما أكو داعي للتذكير.`, meta: via ? `<span>${via}</span>` : '' }); renderA(); return; }
     const m = { from: 'bot', act: { kind: 'remind', cid: c.id, name: c.name, bal, status: 'busy' }, meta: via };
@@ -920,15 +921,19 @@ async function startAction(act, source) {
   }
   if (act.tool === 'order') {
     const sid = act.args?.supplier;
-    if (!sid) { A.chat.push({ from: 'bot', act: { kind: 'pickSup' }, text: 'من يا مورد تريد أطلب؟' }); renderA(); return; }
+    if (!sid) { A.pendingOrder = { force: act.args?.force, items: act.args?.items }; A.chat.push({ from: 'bot', act: { kind: 'pickSup' }, text: 'من يا مورد تريد أطلب؟' }); renderA(); return; }
     const sp = SUPPLIERS[sid];
+    A.ctx = { ...(A.ctx || {}), supplier: sid };
     const open = S.orders.find((o) => o.sid === sid && OPEN.includes(o.status));
     if (open) { A.chat.push({ from: 'bot', text: `اكو طلبية مفتوحة لـ${sp.short} (${open.id}: ${STATUS_AR[open.status]}). شوفها بشاشة الموردين.`, meta: '<button data-a="sub" data-k="sup">افتح الموردين</button>' }); renderA(); return; }
-    const r = L.reorder({ incoming: incomingOf(S.orders) });
-    const items = r.bySup[sid].filter((i) => i.order > 0).map((i) => ({ sku: i.sku, qty: i.order }));
-    if (!items.length) { A.chat.push({ from: 'bot', text: `المواد اللي تجيك من ${sp.short} كافية هسه حسب سرعة البيع، فما أحتاج أطلب.` }); renderA(); return; }
+    const rows = L.reorder({ incoming: incomingOf(S.orders) }).bySup[sid] || [];
+    let items = act.args?.items?.length ? act.args.items : rows.filter((i) => i.order > 0).map((i) => ({ sku: i.sku, qty: i.order }));
+    let note = act.args?.items?.length ? 'الكميات مثل ما گلت' : '';
+    // the owner decides: when the stock looks enough and he still wants to order, a week of sales is proposed
+    if (!items.length && act.args?.force) { items = rows.filter((i) => i.perDay > 0).map((i) => ({ sku: i.sku, qty: Math.ceil(i.perDay * 7) })); note = 'حسب الحساب المخزون كافي، فهاي طلبية أسبوع لأنك طلبتها. راجعها قبل الإرسال.'; }
+    if (!items.length) { A.chat.push({ from: 'bot', text: `المواد اللي تجيك من ${sp.short} كافية هسه حسب سرعة البيع، فما تحتاج طلبية. وإذا تريد تطلب بكل الأحوال، اضغط الزر وتطلع طلبية أسبوع تراجعها قبل الإرسال.`, meta: `<button data-a="ordForce" data-id="${sid}">اطلب على أي حال</button>` }); renderA(); return; }
     const value = items.reduce((a, i) => a + i.qty * L.currentCost(i.sku), 0);
-    A.chat.push({ from: 'bot', act: { kind: 'order', sid, name: sp.short, items, value, status: 'ready' }, meta: via }); renderA();
+    A.chat.push({ from: 'bot', act: { kind: 'order', sid, name: sp.short, items, value, status: 'ready', note }, meta: via }); renderA();
   }
 }
 function actCard(m, i) {
@@ -939,7 +944,7 @@ function actCard(m, i) {
   let body = '';
   if (a.status === 'busy') body = '<p class="muted">جاري كتابة الرسالة…</p>';
   else if (a.kind === 'remind') body = a.status === 'ready' ? `<textarea id="actText${i}" rows="3" style="width:100%;border:1px solid var(--line-2);border-radius:10px;padding:6px;margin-top:6px">${esc(a.text)}</textarea>` : `<p style="white-space:pre-wrap;margin-top:6px">${esc(a.text)}</p>`;
-  else body = `<div style="margin-top:6px">${a.items.map((it) => `<div class="srcrow"><span>${productBySku(it.sku).name}</span><b class="num">${it.qty}</b></div>`).join('')}</div>`;
+  else body = `${a.note ? `<p class="muted" style="margin-top:6px">${esc(a.note)}</p>` : ''}<div style="margin-top:6px">${a.items.map((it) => `<div class="srcrow"><span>${productBySku(it.sku).name}</span><b class="num">${it.qty}</b></div>`).join('')}</div>`;
   const foot = a.status === 'ready' ? `<div class="acts" style="margin-top:8px;display:flex;gap:6px"><button class="btn primary" data-a="actSend" data-i="${i}">${icon('check', 14)} أرسل</button><button class="btn" data-a="actCancel" data-i="${i}">إلغاء</button></div><small class="muted">ما ينرسل إلا لما تضغط «أرسل».</small>`
     : a.status === 'sent' ? `<div class="state pos" style="margin-top:8px">${icon('check', 14)} انرسل ${a.kind === 'remind' ? `ووصل إشعار لمحفظة ${esc(a.name)}` : `ووصل إشعار لهاتف ${esc(a.name)}`}</div>`
     : a.status === 'cancelled' ? '<div class="state neg" style="margin-top:8px">انلغى</div>' : '';
@@ -1002,6 +1007,8 @@ async function sendChat(text, opts = {}) {
     if (isOpenQuestion(q) && !detectAction(q)) {
       // open question → the agent (read-only tools, up to MAX_STEPS), proposals become buttons
       const r = await agentAsk(L, q, { useLLM: useLLM() });
+      const rem = (r.proposals || []).find((p) => p.type === 'remind');
+      A.ctx = { ...(A.ctx || {}), q, tool: 'agent', args: {}, ...(rem ? { customer: rem.name } : {}) };
       A.typing = parts.length > 1 && q !== parts.at(-1);
       const src = r.answerSource === 'agent' ? `وكيل Gemini · ${r.stepsUsed} أدوات` : `سير عمل ثابت · ${r.stepsUsed} أدوات`;
       const props = (r.proposals || []).map((p) => p.type === 'remind' ? `<button data-a="remCust" data-n="${esc(p.name)}">ذكّر ${esc(p.name)}</button>` : `<button data-a="propOrd" data-id="${p.supplier}">اطلب من ${esc(p.name)}</button>`).join('');
@@ -1010,7 +1017,8 @@ async function sendChat(text, opts = {}) {
       flowMark('agent', 'g7', `«${q}» ${r.answerSource === 'agent' ? `جاوبه الوكيل بـ${r.stepsUsed} أدوات` : 'جاوبه سير العمل الثابت'}`);
       continue;
     }
-    const r = await ask(L, q, { useLLM: useLLM() });
+    const r = await ask(L, q, { useLLM: useLLM(), ctx: A.ctx });
+    A.ctx = r.ctx || A.ctx;
     if (r.action) { A.typing = false; await startAction(r.action, r.routeSource); S.runs.unshift(r); continue; }
     A.typing = parts.length > 1 && q !== parts.at(-1);
     const meta = `<span>${r.answerSource === 'gemini' ? 'صاغه Gemini' : 'جواب ثابت'} · ${r.routeSource === 'gemini' ? 'فهمه Gemini' : 'فهمه المحلل الثابت'}</span>${r.res ? '<button data-a="showTrace">كيف انحسب؟</button>' : ''}${r.route?.tool === 'forecast' ? '<button data-a="tab" data-k="cash">افتح السيولة</button>' : ''}${r.route?.tool === 'anomalies' ? '<button data-a="sub" data-k="alerts">افتح التنبيهات</button>' : ''}${r.route?.tool === 'reorder' ? '<button data-a="sub" data-k="sup">افتح الموردين</button>' : ''}${r.route?.tool === 'inventory' ? '<button data-a="sub" data-k="inventory">افتح المخزون</button>' : ''}${r.route?.tool === 'customer' && r.res?.figures?.find((f) => f.key === 'balance')?.value > 0 ? `<button data-a="remCust" data-n="${esc(r.route.args.name)}">ذكّره برابط دفع</button>` : ''}`;
@@ -1164,7 +1172,8 @@ document.addEventListener('click', async (ev) => {
       case 'heardOk': { const t = ($('#chatIn')?.value || A.heard?.text || '').trim(); const eng = A.heard?.engine; A.heard = null; sendChat(t, { voice: true, engine: eng }); break; }
       case 'heardEdit': A.heard = null; renderA(); setTimeout(() => $('#chatIn')?.focus(), 30); break;
       case 'actRem': { const m = A.chat[+a.dataset.i]; m.act.done = true; renderA(); await startAction({ tool: 'remind', args: { name: customerById(a.dataset.id).name } }, 'button'); break; }
-      case 'actOrd': { const m = A.chat[+a.dataset.i]; m.act.done = true; renderA(); await startAction({ tool: 'order', args: { supplier: a.dataset.id } }, 'button'); break; }
+      case 'actOrd': { const m = A.chat[+a.dataset.i]; m.act.done = true; renderA(); const pend = A.pendingOrder || {}; A.pendingOrder = null; await startAction({ tool: 'order', args: { ...pend, supplier: a.dataset.id } }, 'button'); break; }
+      case 'ordForce': await startAction({ tool: 'order', args: { supplier: a.dataset.id, force: true } }, 'button'); break;
       case 'actSend': {
         const m = A.chat[+a.dataset.i]; const act = m.act; if (act.status !== 'ready') break;
         if (act.kind === 'remind') { act.text = document.querySelector(`#actText${a.dataset.i}`)?.value || act.text; if (sendReminderTo(act.cid, act.text) === false) { act.status = 'cancelled'; renderA(); break; } }
@@ -1356,8 +1365,8 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === ' ' && !e.target.closest('button')) { e.preventDefault(); flowPlay(); }
 });
 
-// voice: record WAV → the first available engine transcribes it (Whisper large-v3 on Groq,
-// then Gemini, which knows the shop's names, then Grok). Without any key, the browser's own recogniser.
+// voice: record WAV → the first available engine transcribes it (Gemini, which keeps the Iraqi spelling and knows
+// the shop's names, then Whisper large-v3 on Groq, then Grok). Without any key, the browser's own recogniser.
 let rec = null, srRec = null, recTimer = null, levels = [];
 function sttEngines() {
   const all = (llmStatus().voice?.stt || []).filter((e) => e !== 'gemini' || useLLM());

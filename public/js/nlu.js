@@ -203,20 +203,62 @@ const VOC = /^(يا\s*)?(علي|حبيبي|عيني|عيوني|اخي|أخي|ا�
 export const stripVocative = (q) => (q || '').replace(VOC, '').trim();
 export function detectAction(q) {
   const t = ' ' + normalizeIraqi(stripVocative(q)) + ' ';
-  const remind = /(ذكر|ذكره|ذكرها|ذكرهم|تذكير|رابط|طالب|طالبه|طالبها|دزله|دزلها|ارسله|ارسلها|ابعثله|ابعثلها)/.test(t) && !/(شكد|منو|شنو|كم |متى|ليش)/.test(t);
+  // a question is never a command: «شكد اطلب أم زينب؟» asks what she owes (اطلب = I am owed), «شنو اطلب؟» what to order
+  const asking = /(شكد|منو|شنو|كم |متى|ليش|شلون)/.test(t);
+  const remind = /(ذكر|ذكره|ذكرها|ذكرهم|تذكير|رابط|طالب|طالبه|طالبها|دزله|دزلها|ارسله|ارسلها|ابعثله|ابعثلها)/.test(t) && !asking;
   if (remind) {
     const c = findCustomer(stripVocative(q).replace(/(ذكّ?ر|تذكير|برابط|رابط|الدفع|للدفع|دفع|طالب|دز|له|لها|ارسل|ابعث)/g, ' '));
     return { tool: 'remind', args: { name: c?.name || null } };
   }
-  const order = /(اطلب|اطلبلي|دز طلبيه|دز طلبية|سوي طلبيه|سوي طلبية|ارسل طلبيه|ارسل طلبية|اطلب بضاعه|اطلب بضاعة)/.test(t);
+  const order = /(اطلب|اطلبلي|دز طلبيه|دز طلبية|سوي طلبيه|سوي طلبية|ارسل طلبيه|ارسل طلبية|اطلب بضاعه|اطلب بضاعة)/.test(t) && !asking;
   if (order) {
-    const sp = Object.values(SUPPLIERS).find((x) => t.includes(norm(x.short)) || t.includes(norm(x.contact)));
-    return { tool: 'order', args: { supplier: sp?.id || null } };
+    let sp = Object.values(SUPPLIERS).find((x) => t.includes(norm(x.short)) || t.includes(norm(x.contact)));
+    // items said with a number («اطلب 20 كيلو سكر») go on the order as said; with no supplier named, theirs is used
+    let items = itemsIn(t).filter((i) => !i.qtyGuessed).map(({ sku, qty }) => ({ sku, qty }));
+    if (!sp && items.length) sp = SUPPLIERS[PRODUCTS.find((p) => p.sku === items[0].sku).supplier];
+    if (sp) items = items.filter((i) => PRODUCTS.find((p) => p.sku === i.sku).supplier === sp.id);
+    // «اطلب على أي حال»: the owner orders even when the stock looks enough
+    const force = /(عل[يى] (اي|كل) حال|عالكل حال|حتي لو|حتى لو|مع ذلك|بكل الاحوال|غصبا|ولو ماكو حاجه)/.test(t);
+    return { tool: 'order', args: { supplier: sp?.id || null, ...(force ? { force: true } : {}), ...(items.length ? { items } : {}) } };
   }
   return null;
 }
+// a short follow-up keeps the last question's subject: «والبارحة؟» after «شكد بعت اليوم؟», «والسكر؟» after a stock question
+const PERIODIC = ['sales', 'profit', 'expenses', 'topItems', 'fxImpact'];
+export function followUp(q, ctx) {
+  if (!ctx?.tool) return null;
+  const qn = normalizeIraqi(q);
+  if (qn.split(/\s+/).filter(Boolean).length > 4) return null; // a whole new question is not a follow-up
+  const per = detectPeriod(qn), cust = findCustomer(q), product = findProduct(q) || findProduct(qn);
+  if (per && per.period !== 'out_of_range' && PERIODIC.includes(ctx.tool)) return { tool: ctx.tool, args: { ...ctx.args, period: per.period, arg: per.arg } };
+  if (cust && ['customer', 'debts'].includes(ctx.tool)) return { tool: 'customer', args: { name: cust.name } };
+  if (product && ['inventory', 'topItems'].includes(ctx.tool)) return { tool: ctx.tool, args: { ...ctx.args, sku: product.sku } };
+  return null;
+}
+// what the conversation is about after a turn: the last subject, customer and supplier
+export function nextContext(prev, q, r) {
+  const c = { ...(prev || {}) };
+  if (r?.tool && !r.refuse && r.tool !== 'unknown') { c.q = q; c.tool = r.tool; c.args = r.args || {}; }
+  if (r?.args?.name) c.customer = r.args.name;
+  if (r?.args?.supplier) c.supplier = r.args.supplier;
+  return c;
+}
 // «شكد ربحت اليوم؟ ومنو مطلوب إلي؟» → two questions
+const QWORD = /^(?:و)?(شكد|شگد|اشكد|منو|شنو|ليش|شلون|كم|وين|اشوكت|متى|شوكت)(?=\s|$)/;
+const GREETING = /^(?:و)?(?:السلام عليكم|سلام عليكم|هلا|هلو|مرحبا|صباح الخير|مساء الخير|مسا الخير|شلونك|شلونكم|اشلونك|شخبارك|شخباركم|شلون الصحه|شلون صحتك)(?:\s+(?:حبيبي|عيني|اخي|اخوي|عمي|استاذ))?$/;
+// spoken questions come back from speech-to-text joined by commas: «السلام عليكم، شلونك، شكد بعت اليوم، وليش نزل ربحي؟».
+// Greetings are dropped; a piece without a question word stays with the question before it (until a «؟» closes it).
 export function splitQuestions(q) {
-  const parts = stripVocative(q).split(/[؟?]/).map((x) => x.trim().replace(/^و\s*/, '').trim()).filter((x) => x.split(/\s+/).length >= 2);
-  return parts.length >= 2 ? parts.slice(0, 3).map((x) => x + '؟') : [stripVocative(q)];
+  const whole = stripVocative(q), qs = [];
+  for (const part of whole.split(/[؟?]/)) {
+    let cur = -1;
+    for (const s of part.split(/[،,]/).map((x) => x.trim()).filter(Boolean)) {
+      const n = norm(s);
+      if (GREETING.test(n)) continue;
+      if (QWORD.test(n) || cur < 0) cur = qs.push(s.replace(/^و\s*/, '')) - 1;
+      else qs[cur] += '، ' + s;
+    }
+  }
+  const real = qs.filter((x) => QWORD.test(norm(x)) && x.split(/\s+/).length >= 2);
+  return real.length >= 2 ? real.slice(0, 3).map((x) => x + '؟') : [whole];
 }

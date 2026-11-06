@@ -13,7 +13,8 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = fileURLToPath(new URL('./', import.meta.url));
 // Windows Notepad often saves «.env» as «.env.txt», so accept that (and «env.txt») too.
-const ENV_FILES = ['.env', '.env.txt', 'env.txt'].map((f) => join(HERE, f)).filter((f) => existsSync(f));
+// the tests start the server with NO_DOTENV=1, so the developer's own keys do not turn «no key» checks into key checks
+const ENV_FILES = process.env.NO_DOTENV ? [] : ['.env', '.env.txt', 'env.txt'].map((f) => join(HERE, f)).filter((f) => existsSync(f));
 for (const envFile of ENV_FILES) for (const line of readFileSync(envFile, 'utf8').replace(/^\uFEFF/, '').split(/\r?\n/)) {
   const m = line.match(/^\s*(?:export\s+)?([A-Z_]+)\s*=\s*(.*?)\s*$/); if (m && m[2] && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
 }
@@ -21,15 +22,17 @@ const ROOT = join(HERE, 'public');
 const LOGS = join(HERE, 'logs');
 const PORT = +process.env.PORT || 8080;
 // Model setup (see README «النماذج»):
-//   fast   → routing, phrasing, the agent loop      (Groq if GROQ_API_KEY is set, else Gemini Flash-Lite)
+//   fast   → routing, phrasing, the agent loop      (Gemini Flash-Lite; Groq only without a Gemini key, or when Gemini is busy.
+//            Live testing showed Llama on Groq refusing plain Iraqi shop questions that Gemini understands)
 //   media  → voice and images                        (Gemini Flash-Lite: 500 requests/day on the free tier)
 //   strong → reading a photographed notebook page    (Gemini Flash: only ~20/day free, so used sparingly)
 const MODEL = process.env.GEMINI_MODEL || 'gemini-flash-lite-latest';
 const MODEL_STRONG = process.env.GEMINI_MODEL_STRONG || 'gemini-flash-latest';
 const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
-const TEXT_PROVIDER = process.env.LLM_TEXT_PROVIDER || (process.env.GROQ_API_KEY ? 'groq' : 'gemini');
+const TEXT_PROVIDER = process.env.LLM_TEXT_PROVIDER || (process.env.GEMINI_API_KEY || !process.env.GROQ_API_KEY ? 'gemini' : 'groq');
 // Voice (see README «الصوت»):
-//   speech → text: Whisper large-v3 (on Groq) → Gemini (knows the shop's names) → Grok STT (xAI), order set by STT_ORDER
+//   speech → text: Gemini (told to keep the Iraqi spelling, knows the shop's names) → Whisper large-v3 (on Groq) → Grok STT (xAI),
+//                  order set by STT_ORDER. Whisper alone tended to write «شكد» as «اش قد» and «أحچي» as «أحكي»
 //   text → speech: Grok TTS (xAI). There is no Iraqi locale, so the Gulf one (closest to Basra speech) is the default.
 //   Without XAI_API_KEY the browser's own Arabic voice reads the answers.
 const WHISPER_MODEL = process.env.WHISPER_MODEL || 'whisper-large-v3';
@@ -38,7 +41,7 @@ const XAI_VOICE = process.env.XAI_VOICE || 'ara';
 const XAI_TTS_LANG = process.env.XAI_TTS_LANG || 'ar-AE';
 const XAI_BASE = process.env.XAI_BASE_URL || 'https://api.x.ai/v1';
 const GROQ_BASE = process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1';
-const STT_ORDER = (process.env.STT_ORDER || 'whisper,gemini,grok').split(',').map((x) => x.trim()).filter(Boolean);
+const STT_ORDER = (process.env.STT_ORDER || 'gemini,whisper,grok').split(',').map((x) => x.trim()).filter(Boolean);
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg' };
 
 const body = (req) => new Promise((res, rej) => {

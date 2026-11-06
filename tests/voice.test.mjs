@@ -26,7 +26,7 @@ await new Promise((r) => fake.once('listening', r));
 const up = `http://127.0.0.1:${fake.address().port}`;
 
 const start = (env, port) => new Promise((res) => {
-  const p = spawn(process.execPath, ['server.js'], { env: { PATH: process.env.PATH, PORT: String(port), ...env }, cwd: fileURLToPath(new URL('..', import.meta.url)) });
+  const p = spawn(process.execPath, ['server.js'], { env: { PATH: process.env.PATH, PORT: String(port), NO_DOTENV: '1', ...env }, cwd: fileURLToPath(new URL('..', import.meta.url)) });
   p.stdout.once('data', () => res(p));
 });
 const wav = 'data:audio/wav;base64,' + Buffer.from('RIFF....WAVEfmt ').toString('base64');

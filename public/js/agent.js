@@ -6,7 +6,7 @@
 //                against the tool result, otherwise the template answer is used
 // ─────────────────────────────────────────────────────────────
 import { Ledger, period } from './ledger.js';
-import { routeOffline, parseEntryOffline, looksLikeEntry, detectAction, stripVocative } from './nlu.js';
+import { routeOffline, parseEntryOffline, looksLikeEntry, detectAction, stripVocative, followUp, nextContext } from './nlu.js';
 import { callLLM, extractJSON, llmStatus } from './llm.js';
 import { sttRemote } from './voice.js';
 import { mask, unmask, nameOfCode, CUSTOMER_CODES } from './privacy.js';
@@ -35,6 +35,8 @@ const ROUTER = `أنت موجّه أسئلة داخل تطبيق دفتر حسا
 - remind {name: رمز الزبون|null} : ذكّر زبون بدينه وأرسله رابط دفع (مثل «ذكّر C2»، «دزله رابط دفع»)
 - order {supplier: S1|S2|S3|null} : سوّي طلبية لمورد. الموردين: ${Object.values(SUPPLIERS).map((x) => `${x.id}=${x.short}`).join('، ')}
 الكلام ممكن يبدأ بنداء مثل «علي» أو «حبيبي»، تجاهله.
+أمثلة: «شكد بالمخزن؟» أو «شكد باقي سكر؟» أو «شنو قرب يخلص؟» = inventory (هاي من صلب شغل المحل، لا ترفضها). «شكد اطلب C2؟» يعني شكد مطلوب عند الزبون = customer.
+إذا انطاك «السؤال السابق» والسؤال هسه تكملة إله (مثل «والبارحة؟» أو «وC3؟» أو «والسكر؟»)، استخدم نفس الأداة ويا اللي تغيّر.
 ${dialectGlossary()}
 period واحد من: ${PERIODS.join(', ')}. إذا period=month فـ arg رقم الشهر (1-12). اليوم ${TODAY}. البيانات موجودة بس لآخر 90 يوم.
 إذا السؤال عن زبون أو مادة مو موجودة بالقوائم، أو عن فترة قبل 90 يوم، أو ما إله علاقة بالمحل: أرجع {"refuse":true,"reason":"unknown_customer|unknown_product|out_of_range|offtopic"}.
@@ -77,15 +79,21 @@ function validRoute(j) {
   if (a.sku && !productBySku(a.sku)) return false;
   return true;
 }
-export async function route(q, { useLLM = true } = {}) {
-  const off = routeOffline(q);
+// ctx: what the conversation was about (nextContext), so «والبارحة؟» or «وأبو علي؟» are understood
+export async function route(q, { useLLM = true, ctx = null } = {}) {
+  let off = routeOffline(q);
+  if (off.tool === 'unknown') off = followUp(q, ctx) || off;
   if (useLLM && llmStatus().ok) {
     try {
       const sent = mask(q);
-      const { text, ms } = await callLLM({ system: ROUTER, messages: [{ role: 'user', content: sent }], json: true, maxTokens: 200, timeoutMs: 22000 });
+      const prev = ctx?.q ? `السؤال السابق: «${mask(ctx.q)}» (الأداة: ${ctx.tool})
+السؤال هسه: ` : '';
+      const { text, ms } = await callLLM({ system: ROUTER, messages: [{ role: 'user', content: prev + sent }], json: true, maxTokens: 200, timeoutMs: 22000 });
       const j = extractJSON(text);
       if (j?.args?.name && /^C\d+$/.test(j.args.name)) j.args.name = nameOfCode(j.args.name) || j.args.name;
       if (j) j.sent = sent;
+      // a refusal does not beat a clear match by the fixed rules (live test: «شكد بالمخزن» was refused as off-topic)
+      if (j?.refuse && ['inventory', 'customer', 'reorder'].includes(off.tool)) return { route: off, source: 'offline', fallback: 'النموذج رفض السؤال، والمحلل الثابت فهمه', raw: text, offline: off, sent };
       if (validRoute(j)) { const sent = j.sent; delete j.sent; return { route: j, source: 'gemini', ms, offline: off, sent }; }
       return { route: off, source: 'offline', fallback: 'رد النموذج ما اجتاز التحقق', raw: text, offline: off, sent };
     } catch (e) { return { route: off, source: 'offline', fallback: friendlyErr(e), offline: off }; }
@@ -153,10 +161,10 @@ export function templateAnswer(r, res) {
       return `مطلوبلك ${fmt(F(res, 'total'))} دينار عند ${res.rows.length} زباين. أكثرهم: ${top}.${late.length ? ` و${late.join(' و')} متأخر عن عادته.` : ''}`;
     }
     case 'customer': {
-      const b = F(res, 'balance');
-      if (!b) return `${res.customer.name} مسدد كلشي، ما مطلوب منه شي.`;
+      const b = F(res, 'balance'), n = res.customer.name, she = /^(أم|ام|ست)\s/.test(n); // «أم زينب مطلوب منها»
+      if (!b) return `${n} ${she ? 'مسددة' : 'مسدد'} كلشي، ما مطلوب ${she ? 'منها' : 'منه'} شي.`;
       const oldest = Math.max(...res.open.map((d) => d.age));
-      return `${res.customer.name} مطلوب منه ${fmt(b)} دينار. أقدم دين عمره ${oldest} يوم${res.usual != null ? `، وعادته يسدد خلال ${res.usual} يوم` : ''}.`;
+      return `${n} مطلوب ${she ? 'منها' : 'منه'} ${fmt(b)} دينار. أقدم دين عمره ${oldest} يوم${res.usual != null ? `، و${she ? 'عادتها تسدد' : 'عادته يسدد'} خلال ${res.usual} يوم` : ''}.`;
     }
     case 'topItems': {
       if (r.args?.sku) { const row = res.rows.find((x) => x.sku === r.args.sku); return row ? (row.profit >= 0 ? `${L} ربحت من ${row.name} ${fmt(row.profit)} دينار (بعت ${fmt(row.qty)}).` : `${L} خسرت بـ${row.name} ${fmt(-row.profit)} دينار (بعت ${fmt(row.qty)})، لأن كلفته صارت أعلى من سعر بيعك.`) : REFUSALS.unknown_product; }
@@ -224,13 +232,19 @@ export function compact(res) {
   return JSON.stringify(c);
 }
 
-export async function ask(L, q, { useLLM = true } = {}) {
+export async function ask(L, q, { useLLM = true, ctx = null } = {}) {
   const trace = [];
   const t0 = performance.now();
   q = stripVocative(q);
   const act = detectAction(q);
-  if (act) { trace.push({ step: 'فهم الأمر', source: 'offline', detail: act }); return { q, route: act, routeSource: 'offline', action: act, trace, ms: Math.round(performance.now() - t0) }; }
-  const rt = await route(q, { useLLM });
+  if (act) {
+    // «ذكّرها» right after a question about أم زينب means her; «اطلب على أي حال» means the supplier just discussed
+    if (act.tool === 'remind' && !act.args.name && ctx?.customer) { act.args.name = ctx.customer; act.fromContext = true; }
+    if (act.tool === 'order' && !act.args.supplier && ctx?.supplier) { act.args.supplier = ctx.supplier; act.fromContext = true; }
+    trace.push({ step: 'فهم الأمر', source: 'offline', detail: act, ...(act.fromContext ? { context: 'من الكلام السابق' } : {}) });
+    return { q, route: act, routeSource: 'offline', action: act, trace, ms: Math.round(performance.now() - t0), ctx: nextContext(ctx, q, act) };
+  }
+  const rt = await route(q, { useLLM, ctx });
   trace.push({ step: 'فهم السؤال', source: rt.source, ms: rt.ms, detail: rt.route, fallback: rt.fallback });
   if (rt.sent) trace.push({ step: 'الخصوصية', sent: rt.sent });
   const r = rt.route;
@@ -252,7 +266,7 @@ export async function ask(L, q, { useLLM = true } = {}) {
     } catch (e) { trace.push({ step: 'صياغة الجواب', source: 'gemini', error: friendlyErr(e) }); }
   }
   trace.push({ step: 'التحقق', ok: !res || !validateAnswer(answer, res, r).length, answerSource });
-  return { q, route: r, routeSource: rt.source, res, answer, answerSource, main: mainFigure(r, res), trace, ms: Math.round(performance.now() - t0) };
+  return { q, route: r, routeSource: rt.source, res, answer, answerSource, main: mainFigure(r, res), trace, ms: Math.round(performance.now() - t0), ctx: nextContext(ctx, q, r) };
 }
 
 // ── entries from free text ──
@@ -294,11 +308,16 @@ const STT = `إنت تفريغ صوتي (speech-to-text) فقط. حوّل الك
 اكتب الأرقام بالأرقام (مثلاً 25 الف، 3 كراتين). لا تجاوب على السؤال، ولا تضيف تعليق، ولا تكتب أي شي ما انگال. إذا ماكو كلام أبد أرجع text فارغ.
 أرجع JSON فقط: {"text":"..."}`;
 const STT_ASK = 'فرّغ الكلام اللي بالتسجيل الصوتي المرفق.';
-// deterministic touch-ups for near-misses the model sometimes makes
-const STT_FIX = [[/محزن/g, "مخزن"], [/هال(أسماء|اسماء|سمك|اسبوغ)/g, "هالأسبوع"], [/محزون/g, 'مخزون'], [/\s*(هذا التسجيل|التسجيل الصوتي)\.?$/u, ''], [/[.،]+$/u, '']];
+// deterministic touch-ups for near-misses the model sometimes makes, and for dialect words a speech model
+// writes in standard Arabic or another dialect (live test: «شكد» came back as «اش قد», «أحچي» as «أحكي»)
+const STT_FIX = [[/محزن/g, "مخزن"], [/هال(أسماء|اسماء|سمك|اسبوغ)/g, "هالأسبوع"], [/محزون/g, 'مخزون'],
+  [/(^|\s)(?:[اإ]ش\s?[قك]د|ش\s[قك]د|شقد)(?=\s|$|[؟?،.])/gu, '$1شكد'], [/(^|\s)([وف]?)([أاي]|ت|ن)?حكي(?=\s|$|[؟?،.])/gu, (m, b, w, p) => `${b}${w}${p === 'ا' ? 'أ' : p || ''}حچي`],
+  [/(^|\s)([وف]?)حكيت(?=\s|$|[؟?،.])/gu, '$1$2حچيت'], [/(^|\s)([وف]?)([أا]ريد) أن /gu, '$1$2$3 '], [/(^|\s)لماذا(?=\s|$|[؟?،.])/gu, '$1ليش'], [/(^|\s)ماذا(?=\s|$|[؟?،.])/gu, '$1شنو'], [/(^|\s)الآن(?=\s|$|[؟?،.])/gu, '$1هسه'],
+  [/\s*(هذا التسجيل|التسجيل الصوتي)\.?$/u, ''], [/[.،]+$/u, '']];
 export function cleanTranscript(t) { let s = (t || '').trim(); for (const [re, to] of STT_FIX) s = s.replace(re, to); return s.trim(); }
-// short vocabulary hint for Whisper / Grok (they take a plain prompt, not instructions)
-export const STT_HINT = `بقالة بالبصرة. ${CUSTOMERS.map((c) => c.name).join('، ')}. ${PRODUCTS.map((p) => p.name).join('، ')}. شكد ربحت، منو مطلوب إلي، ذكّر، اطلب من الرافدين، بالدين، الكاش، المحفظة.`;
+// Whisper / Grok take a plain prompt, not instructions: it reads as the text just before the clip, so it is written
+// the way an Iraqi shopkeeper talks, to pull the spelling towards «شكد» and «أحچي» rather than standard Arabic
+export const STT_HINT = `هلا حبيبي، شلونك؟ شكد بعت اليوم؟ شكد ربحت هالأسبوع؟ منو بعده مطلوب إلي؟ ذكّر أم زينب. شكد باقي بالمخزن؟ اطلب من الرافدين. أريد أحچي ويا المساعد. بقالة بالبصرة: ${CUSTOMERS.map((c) => c.name).join('، ')}. ${PRODUCTS.map((p) => p.name).join('، ')}.`;
 // Whisper sometimes "hallucinates" on short or noisy Arabic clips: it repeats a phrase or
 // adds a stock line (subscribe / translation credits). Such output is rejected and the next engine tries.
 export function looksHallucinated(t) {
