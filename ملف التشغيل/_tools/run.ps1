@@ -45,7 +45,7 @@ function Show-Control($health) {
   $link = New-Object System.Windows.Forms.LinkLabel
   $link.Text = $script:url; $link.AutoSize = $true; $link.Location = New-Object System.Drawing.Point(20, 58)
   $link.RightToLeft = 'No'
-  $link.add_LinkClicked({ Start-Process $script:url })
+  $link.add_LinkClicked({ Open-Site $script:url })
 
   $status = New-Object System.Windows.Forms.Label
   $status.Text = Describe-Health $health; $status.Size = New-Object System.Drawing.Size(470, 48); $status.Location = New-Object System.Drawing.Point(20, 92)
@@ -57,7 +57,7 @@ function Show-Control($health) {
   $open = New-Object System.Windows.Forms.Button
   $open.Text = 'افتح الموقع'; $open.Size = New-Object System.Drawing.Size(140, 40); $open.Location = New-Object System.Drawing.Point(20, 222)
   $open.BackColor = [System.Drawing.Color]::FromArgb(91, 42, 134); $open.ForeColor = [System.Drawing.Color]::White; $open.FlatStyle = 'Flat'
-  $open.add_Click({ Start-Process $script:url })
+  $open.add_Click({ Open-Site $script:url })
 
   $keys = New-Object System.Windows.Forms.Button
   $keys.Text = 'إدخال المفاتيح'; $keys.Size = New-Object System.Drawing.Size(140, 40); $keys.Location = New-Object System.Drawing.Point(180, 222)
@@ -67,7 +67,7 @@ function Show-Control($health) {
       # the server reads .env when it starts, so restart it with the new keys
       $status.Text = 'جاري إعادة التشغيل ويا المفاتيح الجديدة…'; $f.Refresh()
       Stop-Server; Start-Sleep -Milliseconds 600
-      try { $h = Start-Server; $status.Text = Describe-Health $h; $script:url = "http://localhost:$($script:port)"; $link.Text = $script:url; Start-Process $script:url }
+      try { $h = Start-Server; $status.Text = Describe-Health $h; $script:url = "http://localhost:$($script:port)"; $link.Text = $script:url; Open-Site $script:url }
       catch { Say $_.Exception.Message 'Error' }
     }
   })
@@ -92,7 +92,7 @@ try {
   # 2. already running? just open it
   foreach ($p in $Ports) {
     $h = Get-Health $p
-    if ($h) { Start-Process "http://localhost:$p"; Say "المحاكاة شغالة من قبل، وفتحتها بالمتصفح.`n$(Describe-Health $h)"; exit }
+    if ($h) { Open-Site "http://localhost:$p"; Say "المحاكاة شغالة من قبل، وفتحتها بالمتصفح.`n$(Describe-Health $h)"; exit }
   }
   # 3. keys: without them the demo still runs, on the rules
   $k = Read-Keys
@@ -103,7 +103,7 @@ try {
   }
   # 4. server, browser, control window
   $h = Start-Server
-  Start-Process "http://localhost:$($script:port)"
+  Open-Site "http://localhost:$($script:port)"
   Show-Control $h
 } catch {
   Stop-Server

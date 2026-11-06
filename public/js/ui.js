@@ -5,7 +5,7 @@ import { ask, parseEntry, looksLikeEntry, readNotebook, notebookToEntries, SAMPL
 import { health, llmStatus, getKey, setKey } from './llm.js';
 import { evalOffline, evalLLM, evalShops } from './eval.js';
 import { autoCheck, incomingOf, makeOrder, orderValue, STATUS_AR, OPEN, describe as describeOrder } from './orders.js';
-import { startRecording, speak, stopSpeaking, sttRemote } from './voice.js';
+import { startRecording, speak, stopSpeaking, sttRemote, voiceStatus } from './voice.js';
 import { FLOWS, LANES, flowSVG, laneIcon, stepMs, ENTER_MS } from './flow.js';
 import { transcribe, STT_HINT, cleanTranscript, looksHallucinated } from './agent.js';
 import { agentAsk, isOpenQuestion, MAX_STEPS } from './agentloop.js';
@@ -60,7 +60,7 @@ function init() {
 }
 // voice preferences, remembered per browser: which speech-to-text engine, and when answers are read aloud
 const VKEY = 'daftar.voice';
-const VOICE = (() => { try { return { stt: 'auto', reply: 'voice', ...JSON.parse(localStorage.getItem(VKEY) || '{}') }; } catch { return { stt: 'auto', reply: 'voice' }; } })();
+const VOICE = (() => { try { return { stt: 'auto', reply: 'voice', who: 'male', ...JSON.parse(localStorage.getItem(VKEY) || '{}') }; } catch { return { stt: 'auto', reply: 'voice', who: 'male' }; } })();
 const saveVoice = () => { try { localStorage.setItem(VKEY, JSON.stringify(VOICE)); } catch {} };
 const ENGINE_AR = { gemini: 'Gemini', grok: 'Grok', whisper: 'Whisper large-v3', browser: 'المتصفح' };
 const describeItems = (t) => (t.items || []).map((i) => `${i.qty} ${productBySku(i.sku).name}`).join(' + ');
@@ -1034,14 +1034,19 @@ async function sendChat(text, opts = {}) {
     if (said.length) sayMsgs(said.map(([, i]) => i));
   }
 }
-// read answers aloud: Grok voice if the server has an xAI key, else the browser's Arabic voice
+// read answers aloud: the browser's Iraqi voice (Edge: «باسل»/«رنا»), else Grok if the server has an xAI key, else any Arabic voice
+let warnedNoVoice = false;
+const voiceName = (h) => (h.engine === 'browser' && h.voice ? `«${h.voice.replace(/^Microsoft\s+/, '').replace(/\s+Online.*$/, '')}» بالمتصفح` : ENGINE_AR[h.engine]);
 async function sayMsgs(idx) {
   const A = S.A;
   for (const i of idx) {
     const m = A.chat[i]; if (!m) continue;
     A.speaking = i; renderA();
     const ended = new Promise((res) => {
-      speak(m.text, { engine: llmStatus().voice?.tts, onEnd: res }).then((h) => { if (!h) res(); else if (i === A.speaking) event(`قرا الجواب بصوت ${ENGINE_AR[h.engine]}.`); });
+      speak(m.text, { engine: llmStatus().voice?.tts, who: VOICE.who, onEnd: res }).then((h) => {
+        if (!h) { res(); if (!warnedNoVoice) { warnedNoVoice = true; toastA('هذا المتصفح ما بيه صوت عربي', 'افتح التطبيق بـMicrosoft Edge حتى تسمع «باسل» أو «رنا» بالعراقي', { long: true }); } }
+        else if (i === A.speaking) event(`قرا الجواب بصوت ${voiceName(h)}.`);
+      });
     });
     await ended;
     if (A.speaking !== i) return; // stopped or replaced
@@ -1433,15 +1438,17 @@ $('#settingsBtn').addEventListener('click', () => {
       <div id="keyMsg" class="pnote"></div>
       ${voiceSettings(st)}</div>
     <div class="mf"><button class="btn primary" data-m="save">احفظ وجرّب</button><button class="btn" data-m="close">إلغاء</button></div></div></div>`;
+  showVoiceStatus();
 });
 $('#modalRoot').addEventListener('change', (e) => {
   if (e.target.id === 'sttIn') { VOICE.stt = e.target.value; saveVoice(); }
   if (e.target.id === 'replyIn') { VOICE.reply = e.target.value; saveVoice(); renderA(); }
+  if (e.target.id === 'whoIn') { VOICE.who = e.target.value; saveVoice(); showVoiceStatus(); }
 });
 $('#modalRoot').addEventListener('click', async (e) => {
   const m = e.target.closest('[data-m]'); if (!m) return;
   if (m.dataset.m === 'cmp') return compareEngines();
-  if (m.dataset.m === 'ttsTest') { const v = llmStatus().voice || {}; const h = await speak('هلا أبو مصطفى. اليوم بعت بمليون وأربعمية ألف دينار، وأم زينب بعدها مطلوبة إلك خمسة وعشرين ألف.', { engine: v.tts }); $('#ttsMsg').textContent = h ? `ديحچي بصوت ${ENGINE_AR[h.engine]}${h.engine === 'grok' ? ` (${v.ttsVoice} · ${v.ttsLang})` : ''}` : 'ماكو صوت عربي بهالمتصفح'; return; }
+  if (m.dataset.m === 'ttsTest') { const v = llmStatus().voice || {}; const h = await speak('هلا أبو مصطفى. اليوم بعت بمليون وأربعمية ألف دينار، وأم زينب بعدها مطلوبة إلك خمسة وعشرين ألف.', { engine: v.tts, who: VOICE.who }); $('#ttsMsg').textContent = h ? `ديحچي بصوت ${voiceName(h)}${h.engine === 'grok' ? ` (${v.ttsVoice} · ${v.ttsLang})` : ''}` : 'ماكو صوت عربي بهالمتصفح. افتحه بـEdge'; return; }
   if (m.dataset.m === 'close' && (e.target === m || m.tagName === 'BUTTON')) { $('#modalRoot').innerHTML = ''; return; }
   if (m.dataset.m === 'save') {
     setKey($('#keyIn').value); S.useLLM = $('#useIn').checked;
@@ -1461,9 +1468,19 @@ function voiceSettings(st) {
   return `<div class="vset"><h4>${icon('mic', 15)} الصوت</h4>
     <div class="field">تحويل الكلام لنص<select id="sttIn" class="sel">${opt('auto', 'تلقائي: ' + ((v.stt || []).map((e) => ENGINE_AR[e]).join(' ← ') || 'المتصفح'))}${opt('gemini', 'Gemini (يعرف أسماء زباينك)', v.stt.includes('gemini'))}${opt('grok', 'Grok STT (xAI)', v.stt.includes('grok'))}${opt('whisper', 'Whisper large-v3 (Groq)', v.stt.includes('whisper'))}</select></div>
     <div class="field">الرد بصوت<select id="replyIn" class="sel">${[['voice', 'إذا سألت بصوت'], ['always', 'دائماً'], ['off', 'لا']].map(([k, l]) => `<option value="${k}" ${VOICE.reply === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-    <div class="pnote">${v.tts ? `الأجوبة تنقرا بصوت <b>Grok</b> (${esc(v.ttsVoice)} · ${esc(v.ttsLang)}). ماكو لهجة عراقية بـGrok، فالخليجية أقرب وحدة للبصرة.` : 'الأجوبة تنقرا بصوت المتصفح العربي. حتى تصير بصوت Grok، حط <code>XAI_API_KEY</code> بملف <code>.env</code> بالخادم (مو هنا).'}</div>
+    <div class="field">صوت الجواب<select id="whoIn" class="sel">${[['male', 'باسل (عراقي)'], ['female', 'رنا (عراقية)']].map(([k, l]) => `<option value="${k}" ${VOICE.who === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    <div class="pnote" id="voiceAvail">ديدوّر على الأصوات…</div>
     <div class="vrow"><button class="btn sm" data-m="ttsTest">${icon('speaker', 14)} جرّب الصوت</button><button class="btn sm" data-m="cmp" ${(v.stt || []).length ? '' : 'disabled'}>${icon('mic', 14)} قارن المحركات بصوتك</button><span id="ttsMsg" class="pnote"></span></div>
     <div id="cmpOut"></div></div>`;
+}
+async function showVoiceStatus() {
+  const el = $('#voiceAvail'); if (!el) return;
+  const st = await voiceStatus(VOICE.who), tts = llmStatus().voice?.tts;
+  const short = (n) => esc(n.replace(/^Microsoft\s+/, '').replace(/\s+Online.*$/, ''));
+  el.innerHTML = st.iraqi ? `الأجوبة تنقرا بصوت <b>${short(st.iraqi)}</b> العراقي، من المتصفح ومجاناً.`
+    : tts ? `هذا المتصفح ما بيه صوت عراقي، فالأجوبة تنقرا بصوت <b>Grok</b> (خليجي). للصوت العراقي افتح التطبيق بـMicrosoft Edge.`
+    : st.arabic ? `هذا المتصفح ما بيه صوت عراقي، فتنقرا بـ<b>${short(st.arabic)}</b>. للصوت العراقي («باسل» أو «رنا») افتح التطبيق بـMicrosoft Edge.`
+    : 'هذا المتصفح ما بيه ولا صوت عربي (Chrome على Windows هيچ). افتح التطبيق بـMicrosoft Edge حتى تسمع «باسل» أو «رنا» بالعراقي، مجاناً.';
 }
 // record once, send the same clip to every engine that has a key, show text and time side by side
 async function compareEngines() {

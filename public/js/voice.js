@@ -53,8 +53,10 @@ export async function sttRemote(engine, dataUrl, prompt) {
   return j;
 }
 
-// Text → speech. Grok voice (xAI) when the server has a key, otherwise the browser's Arabic voice,
-// so a demo without keys still talks. Only one answer plays at a time.
+// Text → speech. The browser's Iraqi voice comes first: Microsoft Edge offers every page Microsoft's natural
+// «باسل» and «رنا» (Arabic – Iraq), free and without a key. Then Grok (xAI) when the server has a key (its closest
+// accent is the Gulf one), then any other Arabic voice the browser has. Chrome on Windows has no Arabic voice at all,
+// so there the answer is not read rather than read with an English voice. Only one answer plays at a time.
 let current = null;
 export function stopSpeaking() {
   if (current) { current.cancel(); current = null; }
@@ -66,14 +68,47 @@ export function speakable(text) {
   return String(text || '').replace(/<[^>]+>/g, ' ').replace(/[«»"*_#]/g, '').replace(/د\.ع/g, 'دينار')
     .replace(/(\d),(?=\d{3})/g, '$1').replace(/\s+/g, ' ').trim().slice(0, 1200);
 }
-export async function speak(text, { engine = null, onEnd } = {}) {
+// the best Arabic voice in a list: Iraqi first («باسل» for a man's voice, «رنا» for a woman's), natural (online) before
+// installed, then the Gulf accents closest to Basra, then any Arabic. null when there is none.
+const NEAR = ['ar-kw', 'ar-bh', 'ar-sa', 'ar-ae', 'ar-qa', 'ar-om'];
+export function chooseVoice(voices, { who = 'male', iraqiOnly = false } = {}) {
+  const lang = (v) => String(v.lang || '').replace('_', '-').toLowerCase();
+  const ar = (voices || []).filter((v) => /^ar(-|$)/.test(lang(v)));
+  const natural = (v) => (/natural|online|neural/i.test(v.name) || v.localService === false ? 1 : 0);
+  const best = (list) => [...list].sort((x, y) => natural(y) - natural(x))[0] || null;
+  const iq = ar.filter((v) => lang(v) === 'ar-iq');
+  if (iq.length) {
+    const named = iq.filter((v) => (who === 'female' ? /رنا|rana/i : /باسل|bassel/i).test(v.name));
+    return best(named.length ? named : iq);
+  }
+  if (iraqiOnly) return null;
+  for (const l of NEAR) { const v = best(ar.filter((x) => lang(x) === l)); if (v) return v; }
+  return best(ar);
+}
+// the browser's voices arrive a moment after the page loads (Edge fetches its online ones)
+export async function browserVoices(waitMs = 2500) {
+  const synth = typeof window !== 'undefined' && window.speechSynthesis;
+  if (!synth) return [];
+  if (synth.getVoices().length) return synth.getVoices();
+  await new Promise((res) => { synth.addEventListener('voiceschanged', res, { once: true }); setTimeout(res, waitMs); });
+  return synth.getVoices();
+}
+// for Settings: is there an Iraqi voice here, or at least an Arabic one?
+export async function voiceStatus(who = 'male') {
+  const vs = await browserVoices();
+  return { iraqi: chooseVoice(vs, { who, iraqiOnly: true })?.name || null, arabic: chooseVoice(vs, { who })?.name || null };
+}
+export async function speak(text, { engine = null, who = 'male', onEnd } = {}) {
   stopSpeaking();
   const t = speakable(text); if (!t) return null;
   let cancelled = false;
-  const me = { engine: null, cancel: () => { cancelled = true; } };
+  const me = { engine: null, voice: null, cancel: () => { cancelled = true; } };
   current = me;
   const done = () => { if (current === me) current = null; onEnd?.(); };
-  if (engine === 'grok') {
+  const voices = await browserVoices();
+  if (cancelled) return null;
+  const iraqi = chooseVoice(voices, { who, iraqiOnly: true });
+  if (engine === 'grok' && !iraqi) {
     try {
       const r = await fetch('/api/tts', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: t }) });
       if (!r.ok) throw new Error('tts_http_' + r.status);
@@ -87,13 +122,11 @@ export async function speak(text, { engine = null, onEnd } = {}) {
       return me;
     } catch { if (cancelled) return null; /* fall through to the browser voice */ }
   }
-  const synth = window.speechSynthesis;
-  if (!synth) { done(); return null; }
+  const synth = window.speechSynthesis, v = iraqi || chooseVoice(voices, { who });
+  if (!synth || !v) { done(); return null; }
   const u = new SpeechSynthesisUtterance(t);
-  const voices = synth.getVoices();
-  u.voice = voices.find((v) => /ar[-_](IQ|KW|SA|AE)/i.test(v.lang)) || voices.find((v) => /^ar/i.test(v.lang)) || null;
-  u.lang = u.voice?.lang || 'ar-SA'; u.rate = 1;
-  me.engine = 'browser';
+  u.voice = v; u.lang = v.lang; u.rate = 1;
+  me.engine = 'browser'; me.voice = v.name;
   me.cancel = () => { cancelled = true; synth.cancel(); };
   u.onend = done; u.onerror = done;
   synth.speak(u);

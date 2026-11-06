@@ -80,3 +80,10 @@ function Describe-Health($h) {
   $text = @{ groq = 'Groq'; gemini = 'Gemini' }[[string]$h.provider]
   return "النموذج شغال: $($parts -join ' + ')، والنص يروح لـ $text$voice"
 }
+
+# Open the app in Microsoft Edge when it is there: Edge gives web pages Microsoft's natural Iraqi voices
+# («باسل» and «رنا», free), so the answers are read in Iraqi. Chrome on Windows has no Arabic voice at all.
+function Open-Site([string]$url) {
+  $edge = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+  if ($edge) { Start-Process -FilePath $edge -ArgumentList $url } else { Start-Process $url }
+}

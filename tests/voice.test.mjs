@@ -89,5 +89,15 @@ await check('speakable: currency read as a word, no markup, no thousands commas'
 });
 await check('transcript touch-ups still apply', () => assert.equal(cleanTranscript('شكد بالمحزن.'), 'شكد بالمخزن'));
 
+// the reply voice: Edge's Iraqi voices first («باسل» by default, «رنا» if chosen), then the Gulf ones, never an English voice
+const { chooseVoice } = await import('../public/js/voice.js');
+const V = (name, lang, local = false) => ({ name, lang, localService: local });
+const EDGE = [V('Microsoft فاطمة Online (Natural) - Arabic (United Arab Emirates)', 'ar-AE'), V('Microsoft علي Online (Natural) - Arabic (Bahrain)', 'ar-BH'),
+  V('Microsoft رنا Online (Natural) - Arabic (Iraq)', 'ar-IQ'), V('Microsoft باسل Online (Natural) - Arabic (Iraq)', 'ar-IQ'), V('Microsoft Naayf - Arabic (Saudi Arabia)', 'ar-SA', true)];
+await check('Edge: the Iraqi «باسل» is chosen, not the first (UAE) voice in the list', () => assert.match(chooseVoice(EDGE).name, /باسل/));
+await check('Edge: «رنا» when the female voice is chosen', () => assert.match(chooseVoice(EDGE, { who: 'female' }).name, /رنا/));
+await check('no Iraqi voice: the closest Gulf one, natural before installed', () => assert.match(chooseVoice(EDGE.filter((v) => v.lang !== 'ar-IQ')).name, /Bahrain/));
+await check('Chrome on Windows (no Arabic voice): nothing, rather than an English voice', () => assert.equal(chooseVoice([V('Google US English', 'en-US', true), V('Microsoft David - English', 'en-US', true)]), null));
+
 console.log(fail ? `${fail} failed` : 'all passed');
 process.exit(fail ? 1 : 0);
